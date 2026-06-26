@@ -68,12 +68,9 @@ function ensureCloudflared() {
 }
 
 function stopTunnel() {
-  if (tunnelProcess) {
-    try { tunnelProcess.kill("SIGTERM"); } catch {}
-    try { process.kill(-tunnelProcess.pid, "SIGTERM"); } catch {}
-    tunnelProcess = null;
-    tunnelUrl = null;
-  }
+  return fetch(`http://localhost:${PORT}/api/tunnel/stop`, { method: "POST" })
+    .catch(() => {})
+    .then(() => { tunnelUrl = null; });
 }
 
 const OPTIONS = [
@@ -96,12 +93,22 @@ function getLocalIP() {
 }
 
 function killServer() {
-  killPort(PORT);
-  if (serverProcess && serverProcess.pid) {
-    try { process.kill(-serverProcess.pid, "SIGTERM"); } catch {}
-    try { serverProcess.kill("SIGTERM"); } catch {}
-    serverProcess = null;
-  }
+  return new Promise((resolve) => {
+    killPort(PORT);
+    const pid = serverProcess?.pid;
+    if (!pid) { resolve(); return; }
+    try { serverProcess.kill('SIGTERM'); } catch {}
+    const timer = setTimeout(() => {
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+      serverProcess = null;
+      resolve();
+    }, 2000);
+    serverProcess.on('close', () => {
+      clearTimeout(timer);
+      serverProcess = null;
+      resolve();
+    });
+  });
 }
 
 function printMenu() {
@@ -139,10 +146,11 @@ function killPort(port) {
     try {
       const out = execSync(cmd).toString().trim();
       if (out) {
-        const pids = out.split(/[\s\n]+/).filter(Boolean);
-        for (const pid of pids) {
+        for (const pid of out.split(/[\s\n]+/).filter(Boolean)) {
           const n = Number(pid);
-          if (n > 0 && n !== process.pid) try { process.kill(n, "SIGTERM"); } catch {}
+          if (n > 0 && n !== process.pid) {
+            try { process.kill(n, "SIGKILL"); } catch {}
+          }
         }
         return;
       }
@@ -154,12 +162,10 @@ function startServer(tunnel = false) {
   killPort(PORT);
   const env = { ...process.env };
   if (tunnel) env.NEST_TUNNEL = "true";
-  if (existsSync(distServer)) {
-    serverProcess = spawn("node", [distServer], { stdio: "inherit", detached: true, env });
-  } else {
-    const tsxBin = join(root, "node_modules", ".bin", "tsx");
-    serverProcess = spawn(tsxBin, [join(root, "src", "server.ts")], { stdio: "inherit", detached: true, env });
-  }
+  const cmd = existsSync(distServer)
+    ? ["node", distServer]
+    : [join(root, "node_modules", ".bin", "tsx"), join(root, "src", "server.ts")];
+  serverProcess = spawn(cmd[0], cmd.slice(1), { stdio: "inherit", env });
   serverProcess.on("error", () => {});
   serverProcess.on("close", () => { serverProcess = null; });
 }
@@ -187,58 +193,40 @@ async function printTerminalQR(text) {
 
 // ─── Cloudflare Tunnel ───
 async function startTunnel() {
-  const bin = ensureCloudflared();
-  if (!bin) { printMenu(); return; }
-
-  // Restart server with NEST_TUNNEL=true
-  startServer(true);
-  console.log("  \x1b[33m↻\x1b[0m Restarting server with tunnel support...");
-
+  // Ensure server is running
+  startServer();
+  console.log("  \x1b[33m↻\x1b[0m Starting server...");
   await new Promise((r) => setTimeout(r, 1500));
 
   console.log("  \x1b[33m⏳\x1b[0m Starting Cloudflare Tunnel...");
 
-  tunnelProcess = spawn(bin, ["tunnel", "--url", `http://localhost:${PORT}`], {
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-  });
+  // Use server API — so UI and CLI share the same tunnel
+  try {
+    const res = await fetch(`http://localhost:${PORT}/api/tunnel/start`, { method: "POST" });
+    const data = await res.json();
 
-  let resolved = false;
-
-  tunnelProcess.stdout.on("data", (data) => {
-    const lines = data.toString().split("\n");
-    for (const line of lines) {
-      const match = line.match(/https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-      if (match && !resolved) {
-        resolved = true;
-        tunnelUrl = match[0];
-
-        // Restart server WITHOUT tunnel env (it's already running with it)
-        // Just show the QR and wait
-        (async () => {
-          process.stdout.write("\x1B[2J\x1B[0;0H");
-          console.log();
-          console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
-          console.log();
-          console.log("  \x1b[1;37m  \U0001F310 Cloudflare Tunnel Active\x1b[0m");
-          console.log();
-          await printTerminalQR(tunnelUrl);
-          console.log();
-          console.log("  \x1b[1;36m  " + tunnelUrl + "\x1b[0m");
-          console.log();
-          console.log("  \x1b[90m  Press any key to stop tunnel\x1b[0m");
-          console.log();
-          console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
-          console.log();
-        })();
-      }
+    if (data.success && data.url) {
+      tunnelUrl = data.url;
+      process.stdout.write("\x1B[2J\x1B[0;0H");
+      console.log();
+      console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+      console.log();
+      console.log("  \x1b[1;37m  \U0001F310 Cloudflare Tunnel Active\x1b[0m");
+      console.log();
+      await printTerminalQR(tunnelUrl);
+      console.log();
+      console.log("  \x1b[1;36m  " + tunnelUrl + "\x1b[0m");
+      console.log();
+      console.log("  \x1b[90m  Press any key to stop tunnel\x1b[0m");
+      console.log();
+      console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+      console.log();
+    } else {
+      console.log("  \x1b[31m✗\x1b[0m " + (data.error || "Tunnel failed to start"));
     }
-  });
-
-  tunnelProcess.on("close", () => {
-    tunnelProcess = null;
-    tunnelUrl = null;
-  });
+  } catch (err) {
+    console.log("  \x1b[31m✗\x1b[0m Could not reach server at localhost:" + PORT);
+  }
 
   // Wait for any key to stop tunnel
   const waitForKey = () => {
@@ -253,9 +241,9 @@ async function startTunnel() {
 
   await waitForKey();
 
-  // Stop tunnel, restart server normally, show menu
-  stopTunnel();
-  startServer(false);
+  // Stop tunnel via server API
+  try { await fetch(`http://localhost:${PORT}/api/tunnel/stop`, { method: "POST" }); } catch {}
+  tunnelUrl = null;
   await new Promise((r) => setTimeout(r, 500));
   printMenu();
 }
@@ -292,9 +280,12 @@ async function startTray() {
       if (action.item.title === "Open Web UI") {
         openBrowser();
       } else if (action.item.title === "Exit") {
-        killServer();
-        systray.kill(false);
-        process.exit(0);
+        (async () => {
+          await stopTunnel();
+          await killServer();
+          systray.kill(false);
+          process.exit(0);
+        })();
       }
     });
 
@@ -308,7 +299,7 @@ async function startTray() {
   }
 }
 
-function handleSelect() {
+async function handleSelect() {
   const opt = OPTIONS[selected];
 
   if (opt.action === "webui") {
@@ -335,8 +326,8 @@ function handleSelect() {
     process.stdout.write("\x1B[2J\x1B[0;0H");
     console.log();
     console.log("  \x1b[32m\u2713\x1b[0m Shutting down server...");
-    stopTunnel();
-    killServer();
+    await stopTunnel();
+    await killServer();
     console.log("  \x1b[90mBye!\x1b[0m");
     console.log();
     process.exit(0);
@@ -357,6 +348,7 @@ if (process.argv.includes("--tray")) {
 
   // ─── Start server immediately, then show menu ───
   startServer();
+  let cleaning = false;
 
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
@@ -378,10 +370,15 @@ if (process.argv.includes("--tray")) {
         selected = OPTIONS.length - 1;
         handleSelect();
       } else if (key === "\x03") {
-        stopTunnel();
-        killServer();
-        console.log("\n  \x1b[90mBye!\x1b[0m\n");
-        process.exit(0);
+        if (!cleaning) {
+          cleaning = true;
+          (async () => {
+            await stopTunnel();
+            await killServer();
+            console.log("\n  \x1b[90mBye!\x1b[0m\n");
+            process.exit(0);
+          })();
+        }
       }
     });
   } else {
@@ -389,9 +386,13 @@ if (process.argv.includes("--tray")) {
     process.exit(0);
   }
 
-  process.on("SIGINT", () => {
-    stopTunnel();
-    killServer();
+  // SIGINT handler — in raw mode, the stdin handler above catches Ctrl+C.
+  // This is a safety net for edge cases (e.g. SIGINT from another process).
+  process.on("SIGINT", async () => {
+    if (cleaning) return;
+    cleaning = true;
+    await stopTunnel();
+    await killServer();
     console.log("\n  \x1b[90mBye!\x1b[0m\n");
     process.exit(0);
   });

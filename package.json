@@ -11,6 +11,7 @@
     "dev:server": "tsx src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "npm run dev:server",
+    "start": "node dist/server.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

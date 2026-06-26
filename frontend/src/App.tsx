@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import QRCode from "qrcode";
 import {
   BookOpen,
   Code,
@@ -39,6 +40,8 @@ import {
   Globe,
   Copy,
   QrCode,
+  Globe2,
+  Settings,
 } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-clike";
@@ -303,7 +306,7 @@ const parseCSV = (str: string) => {
 };
 
 // ─── Theme Switcher ───
-function ThemeSwitcher() {
+function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
   const [themeName, setThemeName] = useState(
     () => localStorage.getItem("nest_theme_name") || "default",
   );
@@ -328,6 +331,26 @@ function ThemeSwitcher() {
     setIsDark(newDark);
     localStorage.setItem("nest_theme_dark", String(newDark));
   };
+
+  // Mobile mode: flat list items inside parent dropdown
+  if (mobile) {
+    return (
+      <>
+        <button onClick={toggleDark} className="text-xs gap-2">
+          {isDark ? "🌙" : "☀️"} {isDark ? "Dark Mode" : "Light Mode"}
+        </button>
+        {THEME_LIST.map((t) => (
+          <button
+            key={t.name}
+            onClick={() => selectTheme(t.name)}
+            className={`text-xs gap-2 ${themeName === t.name ? "bg-primary/10 text-primary font-bold" : ""}`}
+          >
+            <span>{t.icon}</span> {t.label}
+          </button>
+        ))}
+      </>
+    );
+  }
 
   return (
     <div className="dropdown dropdown-end">
@@ -1463,6 +1486,150 @@ function CourseDetailOverlay({
   );
 }
 
+// ─── QR Code (client-side, no external requests) ───
+function TunnelQR({ url }: { url: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    QRCode.toDataURL(url, { width: 200, margin: 2, errorCorrectionLevel: "L" }, (err: any, dataUrl: string) => {
+      if (!err) setSrc(dataUrl);
+    });
+  }, [url]);
+  if (!src) return null;
+  return <img src={src} alt="Tunnel QR" className="rounded-lg border border-base-300" width={200} height={200} />;
+}
+
+// ─── TunnelModal ───
+function TunnelModal({
+  onClose,
+}: {
+  onClose: () => void;
+}) {
+  const [status, setStatus] = useState<{
+    active: boolean;
+    url: string | null;
+  }>({ active: false, url: null });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch(`${API}/api/tunnel`)
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {});
+  }, []);
+
+  const startTunnel = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetch(`${API}/api/tunnel/start`, { method: "POST" });
+      const d = await r.json();
+      if (d.success) {
+        setStatus({ active: true, url: d.url });
+      } else {
+        setError(d.error || "Failed to start tunnel");
+      }
+    } catch {
+      setError("Connection error");
+    }
+    setLoading(false);
+  };
+
+  const stopTunnel = async () => {
+    setLoading(true);
+    try {
+      await fetch(`${API}/api/tunnel/stop`, { method: "POST" });
+      setStatus({ active: false, url: null });
+    } catch {}
+    setLoading(false);
+  };
+
+  const copyUrl = () => {
+    if (status.url) navigator.clipboard.writeText(status.url);
+  };
+
+  return (
+    <div className="modal modal-open z-[100]">
+      <div className="modal-box max-w-sm bg-base-200 border border-base-300 p-0 shadow-2xl">
+        <div className="p-4 border-b border-base-300 flex justify-between items-center">
+          <h3 className="font-bold text-sm flex items-center gap-2">
+            <Globe2 size={16} className="text-primary" /> Cloudflare Tunnel
+          </h3>
+          <button className="btn btn-ghost btn-xs btn-square" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <div className="p-5 flex flex-col gap-4">
+          {status.active && status.url ? (
+            <>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                <span className="font-bold">Tunnel Active</span>
+              </div>
+              <div className="flex justify-center">
+                <TunnelQR url={status.url} />
+              </div>
+              <div className="bg-base-100 rounded-lg p-3 flex items-center gap-2">
+                <span className="text-xs font-mono truncate flex-1">
+                  {status.url}
+                </span>
+                <button
+                  className="btn btn-ghost btn-xs btn-square shrink-0"
+                  onClick={copyUrl}
+                  title="Copy URL"
+                >
+                  <Copy size={12} />
+                </button>
+                <a
+                  href={status.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost btn-xs btn-square shrink-0"
+                >
+                  <ExternalLink size={12} />
+                </a>
+              </div>
+              <button
+                onClick={stopTunnel}
+                disabled={loading}
+                className="btn btn-error btn-sm w-full gap-2"
+              >
+                {loading ? (
+                  <Loader size={14} className="animate-spin" />
+                ) : (
+                  "Stop Tunnel"
+                )}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-xs opacity-60">
+                Start a Cloudflare tunnel to share this instance publicly.
+              </div>
+              {error && (
+                <div className="text-[10px] text-error font-bold">{error}</div>
+              )}
+              <button
+                onClick={startTunnel}
+                disabled={loading}
+                className="btn btn-primary btn-sm w-full gap-2"
+              >
+                {loading ? (
+                  <Loader size={14} className="animate-spin" />
+                ) : (
+                  <>
+                    <Globe2 size={14} /> Start Tunnel
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── AddCourseModal ───
 function AddCourseModal({
   onClose,
@@ -1610,7 +1777,6 @@ export default function App() {
     active: boolean;
     url: string | null;
   }>({ active: false, url: null });
-  const [tunnelLoading, setTunnelLoading] = useState(false);
 
   // Poll tunnel status on mount
   useEffect(() => {
@@ -1683,12 +1849,39 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <ThemeSwitcher />
+            {/* Desktop: show all inline */}
+            <div className="hidden sm:flex items-center gap-2">
+              <ThemeSwitcher />
+              <button
+                onClick={() => setShowTunnel(true)}
+                className={`btn btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest border border-base-300 ${tunnelStatus.active ? "text-success border-success/30" : "btn-ghost"}`}
+              >
+                <Globe2 size={14} /> Tunnel
+                {tunnelStatus.active && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
+              </button>
+            </div>
+            {/* Mobile: theme + tunnel in one dropdown */}
+            <div className="sm:hidden dropdown dropdown-end">
+              <button tabIndex={0} className="btn btn-ghost btn-xs gap-1 text-[10px] font-bold uppercase tracking-widest opacity-60 hover:opacity-100">
+                <Settings size={14} /> {tunnelStatus.active && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
+              </button>
+              <ul tabIndex={0} className="dropdown-content menu p-2 bg-base-200 border border-base-300 rounded-md shadow-2xl w-40 z-50">
+                <li>
+                  <button onClick={() => setShowTunnel(true)} className="text-xs gap-2">
+                    <Globe2 size={14} /> Tunnel
+                    {tunnelStatus.active && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse ml-auto" />}
+                  </button>
+                </li>
+                <li className="border-t border-base-300 mt-1 pt-1">
+                  <ThemeSwitcher mobile />
+                </li>
+              </ul>
+            </div>
             <button
               onClick={() => setShowAdd(true)}
               className="btn btn-primary btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest"
             >
-              <Plus size={14} /> Add Course
+              <Plus size={14} /> <span className="hidden sm:inline">Add Course</span>
             </button>
           </div>
         </div>
@@ -1733,6 +1926,16 @@ export default function App() {
           onClose={() => setShowAdd(false)}
           onAdded={fetchCourses}
         />
+      )}
+      {showTunnel && (
+        <TunnelModal onClose={() => {
+          setShowTunnel(false);
+          // Refresh tunnel status when modal closes
+          fetch(`${API}/api/tunnel`)
+            .then((r) => r.json())
+            .then((d) => setTunnelStatus(d))
+            .catch(() => {});
+        }} />
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import fs from 'fs';
-import { readFile, writeFile, readdir, stat } from 'fs/promises';
+import { readFile, writeFile, readdir, stat, rename } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn, execSync } from 'child_process';
@@ -17,18 +17,7 @@ const PORT = Number(process.env.PORT) || 6969;
 const IS_TUNNEL = process.env.NEST_TUNNEL === 'true';
 
 // ─── CORS: localhost only + tunnel support ───
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-      return callback(null, true);
-    }
-    if (IS_TUNNEL && /^https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com(:\d+)?$/.test(origin)) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
-}));
+app.use(cors());
 
 app.use(express.json());
 
@@ -36,13 +25,17 @@ app.use(express.json());
 app.use((_req, res, next) => {
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob:;");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
 // ─── Serve static frontend ───
 const publicDir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'frontend', 'dist');
 if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir));
+  app.use(express.static(publicDir, { maxAge: '1h' }));
 }
 
 // ─── Helpers ───
@@ -61,7 +54,9 @@ const getCourses = async (): Promise<Course[]> => {
 };
 
 const saveCourses = async (courses: Course[]): Promise<void> => {
-  await writeFile(COURSES_PATH, JSON.stringify(courses, null, 2));
+  const tmp = COURSES_PATH + '.tmp';
+  await writeFile(tmp, JSON.stringify(courses, null, 2));
+  await rename(tmp, COURSES_PATH);
 };
 
 const naturalCompare = (a: string, b: string): number => {
@@ -156,14 +151,19 @@ const countVideoFiles = async (dirPath: string): Promise<number> => {
   return count;
 };
 
-// ─── Video count cache (30s TTL) ───
+// ─── Video count cache (30s TTL, max 200 entries) ───
 const videoCountCache = new Map<string, { count: number; ts: number }>();
 const CACHE_TTL = 30_000;
+const CACHE_MAX = 200;
 
 const getCachedVideoCount = async (dirPath: string): Promise<number> => {
   const cached = videoCountCache.get(dirPath);
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.count;
   const count = await countVideoFiles(dirPath);
+  if (videoCountCache.size >= CACHE_MAX) {
+    const oldest = videoCountCache.keys().next().value;
+    if (oldest) videoCountCache.delete(oldest);
+  }
   videoCountCache.set(dirPath, { count, ts: Date.now() });
   return count;
 };
@@ -180,13 +180,26 @@ const getCourseProgressData = async (): Promise<Record<string, Record<string, bo
 };
 
 const saveCourseProgressData = async (data: Record<string, Record<string, boolean>>): Promise<void> => {
-  await writeFile(COURSE_PROGRESS_PATH, JSON.stringify(data));
+  const tmp = COURSE_PROGRESS_PATH + '.tmp';
+  await writeFile(tmp, JSON.stringify(data));
+  await rename(tmp, COURSE_PROGRESS_PATH);
 };
 
 // ─── Cloudflare Tunnel (server-side for web UI control) ───
 
 let tunnelChild: ReturnType<typeof spawn> | null = null;
 let tunnelPublicUrl: string | null = null;
+
+const NEST_BIN_DIR = path.join(homedir(), '.nest', 'bin');
+const CLOUDFLARED_PATH = path.join(NEST_BIN_DIR, 'cloudflared');
+
+function getCloudflaredDownloadUrl(): string {
+  const p = platform();
+  const a = arch();
+  const osMap: Record<string, string> = { linux: 'linux', darwin: 'darwin' };
+  const archMap: Record<string, string> = { x64: 'amd64', arm64: 'arm64' };
+  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${osMap[p] || p}-${archMap[a] || a}`;
+}
 
 function findCloudflared(): string | null {
   // 1. Check system PATH
@@ -195,9 +208,19 @@ function findCloudflared(): string | null {
     if (result && fs.existsSync(result)) return result;
   } catch {}
   // 2. Check ~/.nest/bin/cloudflared
-  const localPath = path.join(homedir(), '.nest', 'bin', 'cloudflared');
-  if (fs.existsSync(localPath)) return localPath;
-  return null;
+  if (fs.existsSync(CLOUDFLARED_PATH)) return CLOUDFLARED_PATH;
+  // 3. Auto-download
+  console.log('[Tunnel] cloudflared not found — downloading...');
+  try {
+    if (!fs.existsSync(NEST_BIN_DIR)) fs.mkdirSync(NEST_BIN_DIR, { recursive: true });
+    execSync(`curl -fSL -o "${CLOUDFLARED_PATH}" "${getCloudflaredDownloadUrl()}"`, { stdio: 'inherit' });
+    fs.chmodSync(CLOUDFLARED_PATH, 0o755);
+    console.log('[Tunnel] cloudflared installed');
+    return CLOUDFLARED_PATH;
+  } catch {
+    console.error('[Tunnel] Failed to download cloudflared');
+    return null;
+  }
 }
 
 app.get('/api/tunnel', (_req, res) => {
@@ -220,16 +243,21 @@ app.post('/api/tunnel/start', async (_req, res) => {
 
   let resolved = false;
 
-  tunnelChild.stdout?.on('data', (data) => {
-    const lines = data.toString().split('\n');
-    for (const line of lines) {
-      const match = line.match(/https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
-      if (match && !resolved) {
-        resolved = true;
-        tunnelPublicUrl = match[0];
-        console.log(`[Tunnel] URL: ${tunnelPublicUrl}`);
-      }
+  const extractUrl = (text: string) => {
+    if (resolved) return;
+    const match = text.match(/https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+    if (match) {
+      resolved = true;
+      tunnelPublicUrl = match[0];
     }
+  };
+
+  tunnelChild.stdout?.on('data', (data) => {
+    extractUrl(data.toString());
+  });
+
+  tunnelChild.stderr?.on('data', (data) => {
+    extractUrl(data.toString());
   });
 
   tunnelChild.on('close', () => {
@@ -237,20 +265,22 @@ app.post('/api/tunnel/start', async (_req, res) => {
     tunnelPublicUrl = null;
   });
 
-  tunnelChild.on('error', (err) => {
-    console.error('[Tunnel] Error:', err);
+  tunnelChild.on('error', () => {
     tunnelChild = null;
     tunnelPublicUrl = null;
   });
 
   // Wait up to 15s for URL
-  const start = Date.now();
-  while (!tunnelPublicUrl && Date.now() - start < 15000) {
-    await new Promise(r => setTimeout(r, 200));
-  }
+  const tunnelUrl = await new Promise<string | null>((resolve) => {
+    if (tunnelPublicUrl) return resolve(tunnelPublicUrl);
+    const timer = setTimeout(() => { clearInterval(interval); resolve(null); }, 15000);
+    const interval = setInterval(() => {
+      if (tunnelPublicUrl) { clearTimeout(timer); clearInterval(interval); resolve(tunnelPublicUrl); }
+    }, 200);
+  });
 
-  if (tunnelPublicUrl) {
-    res.json({ success: true, url: tunnelPublicUrl });
+  if (tunnelUrl) {
+    res.json({ success: true, url: tunnelUrl });
   } else {
     res.status(500).json({ error: 'Tunnel failed to start (timeout)' });
   }
@@ -268,12 +298,17 @@ app.post('/api/tunnel/stop', (_req, res) => {
 // ─── Course Routes (no auth — local only) ───
 
 app.get('/api/courses', async (_req, res) => {
-  const courses = await getCourses();
-  const enriched: CourseWithVideos[] = await Promise.all(courses.map(async (c) => ({
-    ...c,
-    totalVideos: await getCachedVideoCount(c.localPath),
-  })));
-  res.json(enriched);
+  try {
+    const courses = await getCourses();
+    const enriched: CourseWithVideos[] = await Promise.all(courses.map(async (c) => ({
+      ...c,
+      totalVideos: await getCachedVideoCount(c.localPath),
+    })));
+    res.json(enriched);
+  } catch (err) {
+    console.error('[Courses] List error:', err);
+    res.status(500).json({ error: 'Failed to load courses' });
+  }
 });
 
 app.post('/api/courses', async (req, res) => {
@@ -344,6 +379,7 @@ app.get('/api/courses/:id/browse', async (req, res) => {
 });
 
 app.get('/api/courses/:id/file', async (req, res) => {
+  try {
   const courses = await getCourses();
   const course = courses.find((c) => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'Course not found' });
@@ -352,26 +388,36 @@ app.get('/api/courses/:id/file', async (req, res) => {
   if (!filePath) return res.status(400).json({ error: 'File path required' });
 
   const resolved = path.resolve(course.localPath, filePath);
-  if (!resolved.startsWith(path.resolve(course.localPath))) {
+  // Canonicalize both paths to prevent symlink escapes
+  const courseRoot = await fs.promises.realpath(path.resolve(course.localPath));
+  let realResolved: string;
+  try {
+    realResolved = await fs.promises.realpath(resolved);
+  } catch {
+    // File doesn't exist yet or broken symlink — fall back to resolved path
+    // but still validate the resolved path is under courseRoot
+    realResolved = resolved;
+  }
+  if (!realResolved.startsWith(courseRoot + path.sep) && realResolved !== courseRoot) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
-  const fileStat = await stat(resolved).catch(() => null);
+  const fileStat = await stat(realResolved).catch(() => null);
   if (!fileStat) return res.status(404).json({ error: 'File not found' });
 
-  const ext = path.extname(resolved).toLowerCase();
-  const fileType = getFileType(path.basename(resolved));
+  const ext = path.extname(realResolved).toLowerCase();
+  const fileType = getFileType(path.basename(realResolved));
 
   if (fileType === 'text' || fileType === 'code') {
-    const content = await readFile(resolved, 'utf-8');
-    return res.json({ type: fileType, content, name: path.basename(resolved) });
+    const content = await readFile(realResolved, 'utf-8');
+    return res.json({ type: fileType, content, name: path.basename(realResolved) });
   }
 
   if (fileType === 'link') {
     try {
-      const content = await readFile(resolved, 'utf-8');
+      const content = await readFile(realResolved, 'utf-8');
       const urlMatch = content.match(/URL=(.+)/i) || content.match(/https?:\/\/[^\s]+/);
-      return res.json({ type: 'link', url: urlMatch ? urlMatch[1] || urlMatch[0] : content.trim(), name: path.basename(resolved) });
+      return res.json({ type: 'link', url: urlMatch ? urlMatch[1] || urlMatch[0] : content.trim(), name: path.basename(realResolved) });
     } catch {
       return res.status(500).json({ error: 'Failed to read link file' });
     }
@@ -397,22 +443,26 @@ app.get('/api/courses/:id/file', async (req, res) => {
     const range = req.headers.range;
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0] || '0', 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileStat.size - 1;
+      let start = parseInt(parts[0] || '0', 10);
+      let end = parts[1] ? parseInt(parts[1], 10) : fileStat.size - 1;
+      // Validate and clamp range bounds
+      if (isNaN(start) || start < 0) start = 0;
+      if (isNaN(end) || end >= fileStat.size) end = fileStat.size - 1;
+      if (start > end) start = end;
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileStat.size}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': end - start + 1,
         'Content-Type': contentType,
       });
-      safePipe(fs.createReadStream(resolved, { start, end }), res);
+      safePipe(fs.createReadStream(realResolved, { start, end }), res);
     } else {
       res.writeHead(200, {
         'Content-Length': fileStat.size,
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
       });
-      safePipe(fs.createReadStream(resolved), res);
+      safePipe(fs.createReadStream(realResolved), res);
     }
     return;
   }
@@ -422,7 +472,11 @@ app.get('/api/courses/:id/file', async (req, res) => {
     'Content-Type': contentType,
     'Cache-Control': 'public, max-age=3600',
   });
-  safePipe(fs.createReadStream(resolved), res);
+  safePipe(fs.createReadStream(realResolved), res);
+  } catch (err) {
+    console.error('[Courses] File error:', err);
+    res.status(500).json({ error: 'Failed to serve file' });
+  }
 });
 
 // ─── Course Progress (local, no auth) ───
@@ -463,16 +517,18 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 });
 
 // ─── Graceful Shutdown ───
+let shuttingDown = false;
 const shutdown = (signal: string) => {
-  console.log(`\n[Nest] ${signal} received — shutting down...`);
-  // Stop tunnel on shutdown
+  if (shuttingDown) return;
+  shuttingDown = true;
   if (tunnelChild) {
     try { tunnelChild.kill('SIGTERM'); } catch {}
     tunnelChild = null;
     tunnelPublicUrl = null;
   }
+  (httpServer as any).closeAllConnections?.();
   httpServer.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 5000);
+  setTimeout(() => process.exit(1), 3000);
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
