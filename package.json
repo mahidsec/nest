@@ -31,7 +31,7 @@
     "bin/",
     "dist/",
     "src/",
-    "frontend/",
+    "frontend/dist/",
     "assets/"
   ]
 }
