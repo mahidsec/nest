@@ -5,6 +5,47 @@ import {
   GraduationCap, Briefcase, FolderOpen, FileVideo, FileText, FileIcon, Code2,
   ChevronRight, ArrowLeft, Check, X, Loader, Plus, ExternalLink, Link, Download, ImageIcon, PanelLeftClose, PanelLeft, Home,
 } from 'lucide-react';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-css';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-java';
+import 'prismjs/themes/prism-tomorrow.css';
+
+// ─── Local Type Definitions ───
+type FileType = 'video' | 'text' | 'code' | 'document' | 'link' | 'image' | 'other';
+
+interface FileItem {
+  name: string;
+  type: FileType | 'folder';
+  path: string;
+  size?: number;
+  children?: FileItem[];
+  totalVideos?: number;
+}
+
+interface DirectoryScanResult {
+  items: FileItem[];
+  totalVideos: number;
+}
+
+interface CourseWithVideos {
+  id: string;
+  name: string;
+  subtitle: string;
+  localPath: string;
+  icon: string;
+  createdAt: string;
+  totalVideos: number;
+}
+
 
 const API = window.location.origin;
 const THEME_LIST = [
@@ -16,7 +57,7 @@ const THEME_LIST = [
   { name: 'aurora', label: 'Aurora', icon: '🌌' },
 ];
 
-const COURSE_ICON_MAP: Record<string, any> = {
+const COURSE_ICON_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   Zap, Music, Languages, BookOpen, DollarSign, Code, Paintbrush, Microscope,
   BarChart3, Dumbbell, Camera, Gamepad2, Brain, Scale, HeartPulse, Wrench,
   GraduationCap, Briefcase,
@@ -82,10 +123,10 @@ const COURSE_GRADIENTS_LIGHT: Record<string, string> = {
   GraduationCap: "from-blue-400/70 to-sky-700/90", Briefcase: "from-neutral-500/70 to-slate-700/90",
 };
 
-function countVideos(items: any[]): number {
+function countVideos(items: FileItem[]): number {
   return items.reduce((n, i) => n + (i.type === "video" ? 1 : 0) + (i.children ? countVideos(i.children) : 0), 0);
 }
-function countWatched(items: any[], w: Record<string, boolean>): number {
+function countWatched(items: FileItem[], w: Record<string, boolean>): number {
   return items.reduce((n, i) => n + (i.type === "video" && w[i.path] ? 1 : 0) + (i.children ? countWatched(i.children, w) : 0), 0);
 }
 
@@ -94,7 +135,7 @@ function CourseIcon({ iconKey, size = 20, className = "" }: { iconKey: string; s
   return <IC size={size} className={className} />;
 }
 
-const FILE_TYPE_ICONS: Record<string, any> = {
+const FILE_TYPE_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   video: FileVideo, image: ImageIcon, text: FileText, code: Code2,
   document: FileText, link: ExternalLink, folder: FolderOpen, other: FileIcon,
 };
@@ -184,7 +225,7 @@ function ThemeSwitcher() {
 }
 
 // ─── Course Card ───
-function CourseCard({ course, onClick, onDelete }: { course: any; onClick: () => void; onDelete: () => void }) {
+function CourseCard({ course, onClick, onDelete }: { course: CourseWithVideos; onClick: () => void; onDelete: () => void }) {
   const isDark = useIsDark();
   const gradient = (isDark ? COURSE_GRADIENTS : COURSE_GRADIENTS_LIGHT)[course.icon] || (isDark ? COURSE_GRADIENTS.BookOpen : COURSE_GRADIENTS_LIGHT.BookOpen);
   return (
@@ -240,7 +281,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
         const urlFile = new URLSearchParams(location.search).get('file');
 
         // Find the file and its parent chain to expand
-        const findParentChain = (nodes: any[], targetPath: string, chain: string[] = []): string[] | null => {
+        const findParentChain = (nodes: FileItem[], targetPath: string, chain: string[] = []): string[] | null => {
           for (const n of nodes) {
             if (n.path === targetPath) return chain;
             if (n.children) {
@@ -250,12 +291,12 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
           }
           return null;
         };
-        const findFile = (nodes: any[], path: string): any => {
+        const findFile = (nodes: FileItem[], path: string): FileItem | undefined => {
           for (const n of nodes) {
             if (n.path === path) return n;
             if (n.children) { const f = findFile(n.children, path); if (f) return f; }
           }
-          return null;
+          return undefined;
         };
 
         const restorePath = urlFile || localStorage.getItem(`nest_last_played_${courseId}`);
@@ -271,7 +312,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
         } else {
           // No restore path: expand all top-level folders
           const initExp: Record<string, boolean> = {};
-          d?.items?.forEach((i: any) => { if (i.type === "folder") initExp[i.path] = true; });
+          d?.items?.forEach((i: FileItem) => { if (i.type === "folder") initExp[i.path] = true; });
           setExpanded(initExp);
         }
       })
@@ -279,28 +320,8 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
   }, [courseId]);
 
   useEffect(() => {
-    const loadPrism = () => {
-      if ((window as any).Prism) {
-        (window as any).Prism.highlightAll();
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js";
-      script.dataset.manual = "true";
-      script.onload = () => {
-        const langs = ["javascript", "typescript", "python", "css", "json", "bash", "markdown", "c", "cpp", "java"];
-        let loaded = 0;
-        langs.forEach(l => {
-          const s = document.createElement("script");
-          s.src = `https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-${l}.min.js`;
-          s.onload = () => { loaded++; if (loaded === langs.length) (window as any).Prism?.highlightAll(); };
-          document.head.appendChild(s);
-        });
-      };
-      document.head.appendChild(script);
-    };
     if (activeFile && (activeFile.type === "code" || activeFile.type === "text") && fileContent) {
-      loadPrism();
+      requestAnimationFrame(() => Prism.highlightAll());
     }
   }, [activeFile, fileContent]);
 
@@ -314,7 +335,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
       setExpanded({});
     } else {
       const allExp: Record<string, boolean> = {};
-      const setAll = (nodes: any[]) => {
+      const setAll = (nodes: FileItem[]) => {
         nodes.forEach(n => {
           if (n.type === "folder") {
             allExp[n.path] = true;
@@ -327,8 +348,8 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
     }
   };
 
-  const renderCurriculum = (items: any[], level = 0) => {
-    return items.map((item: any, index: number) => {
+  const renderCurriculum = (items: FileItem[], level = 0) => {
+    return items.map((item: FileItem, index: number) => {
       const isFirst = index === 0;
       const isLast = index === items.length - 1;
       const parentLeft = `calc(${level * 1}rem + 6px)`;
@@ -462,12 +483,12 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
             </button>
             {isExpandedFolder && (
               <div className="flex flex-col relative">
-                {renderCurriculum(item.children, level + 1)}
+                {renderCurriculum(item.children || [], level + 1)}
               </div>
             )}
           </div>
         );
-      } else if (item.type !== "hidden") {
+      } else {
         const FIcon = FILE_TYPE_ICONS[item.type] || FileIcon;
         const isActive = activeFile?.path === item.path;
         return (
@@ -513,7 +534,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
     } catch {}
   };
 
-  const openFile = async (file: any) => {
+  const openFile = async (file: FileItem) => {
     // Push file state to URL (replaceState to avoid flooding history)
     history.replaceState({}, '', `/${courseId}?file=${encodeURIComponent(file.path)}`);
     if (file.name.toLowerCase().endsWith('.xlsx')) {
@@ -548,7 +569,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
 
     // Auto-expand parent folder of this file and scroll to it
     if (data?.items) {
-      const findParentChain = (nodes: any[], targetPath: string, chain: string[] = []): string[] | null => {
+      const findParentChain = (nodes: FileItem[], targetPath: string, chain: string[] = []): string[] | null => {
         for (const n of nodes) {
           if (n.path === targetPath) return chain;
           if (n.children) {
@@ -583,7 +604,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
   const totalV = data?.items ? countVideos(data.items) : 0;
   const watchedV = data?.items ? countWatched(data.items, watched) : 0;
   const pct = totalV > 0 ? Math.round((watchedV / totalV) * 100) : 0;
-  const totalSections = data?.items ? data.items.filter((i: any) => i.type === "folder").length : 0;
+  const totalSections = data?.items ? data.items.filter((i: FileItem) => i.type === "folder").length : 0;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isDark = useIsDark();
   const gradient = (isDark ? COURSE_GRADIENTS : COURSE_GRADIENTS_LIGHT)[data?.icon] || (isDark ? COURSE_GRADIENTS.BookOpen : COURSE_GRADIENTS_LIGHT.BookOpen);
@@ -733,8 +754,8 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
           {/* File / Video Preview Area */}
           <div className="flex-1 flex flex-col bg-base-300/10 overflow-y-auto">
             {activeFile.type === "video" && (() => {
-              const flattenVideos = (nodes: any[]): any[] => {
-                let v: any[] = [];
+              const flattenVideos = (nodes: FileItem[]): FileItem[] => {
+                let v: FileItem[] = [];
                 for (const n of nodes) {
                   if (n.type === "video") v.push(n);
                   if (n.children) v = v.concat(flattenVideos(n.children));
@@ -742,7 +763,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
                 return v;
               };
               const allVideos = flattenVideos(items);
-              const curIdx = allVideos.findIndex((v: any) => v.path === activeFile.path);
+              const curIdx = allVideos.findIndex((v: FileItem) => v.path === activeFile.path);
               const nextVideo = curIdx >= 0 && curIdx < allVideos.length - 1 ? allVideos[curIdx + 1] : null;
 
               return (
@@ -854,7 +875,7 @@ function CourseDetailOverlay({ courseId, onClose }: { courseId: string; onClose:
                       ) : (
                         <pre className={`p-6 overflow-auto text-sm leading-relaxed whitespace-pre font-mono flex-1 language-${(() => {
                           const ext = activeFile.name.split('.').pop()?.toLowerCase() || 'clike';
-                          const map: any = { js: 'javascript', ts: 'typescript', py: 'python', c: 'c', cpp: 'cpp', h: 'c' };
+                          const map: Record<string, string> = { js: 'javascript', ts: 'typescript', py: 'python', c: 'c', cpp: 'cpp', h: 'c' };
                           return map[ext] || ext;
                         })()}`}><code>{fileContent.content}</code></pre>
                       )}

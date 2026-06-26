@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from './config.js';
+import type { Course, CourseWithVideos, FileItem, DirectoryScanResult } from './types.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -23,12 +24,12 @@ if (fs.existsSync(publicDir)) {
 
 // ─── Helpers ───
 
-const getCourses = (): any[] => {
+const getCourses = (): Course[] => {
   if (!fs.existsSync(COURSES_PATH)) return [];
   try { return JSON.parse(fs.readFileSync(COURSES_PATH, 'utf-8')); } catch { return []; }
 };
 
-const saveCourses = (courses: any[]) => {
+const saveCourses = (courses: Course[]) => {
   fs.writeFileSync(COURSES_PATH, JSON.stringify(courses, null, 2));
 };
 
@@ -64,10 +65,10 @@ const getFileType = (filename: string): string => {
   return 'other';
 };
 
-const scanDirectory = (dirPath: string, relativeTo: string): any => {
+const scanDirectory = (dirPath: string, relativeTo: string): DirectoryScanResult => {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  const folders: any[] = [];
-  const files: any[] = [];
+  const folders: FileItem[] = [];
+  const files: FileItem[] = [];
 
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue;
@@ -129,13 +130,11 @@ const saveCourseProgressData = (data: Record<string, Record<string, boolean>>) =
   fs.writeFileSync(COURSE_PROGRESS_PATH, JSON.stringify(data));
 };
 
-
-
 // ─── Course Routes (no auth — local only) ───
 
 app.get('/api/courses', (_req, res) => {
   const courses = getCourses();
-  const enriched = courses.map((c: any) => ({
+  const enriched: CourseWithVideos[] = courses.map((c) => ({
     ...c,
     totalVideos: countVideoFiles(c.localPath),
   }));
@@ -168,7 +167,7 @@ app.post('/api/courses', (req, res) => {
 
 app.delete('/api/courses/:id', (req, res) => {
   const courses = getCourses();
-  const filtered = courses.filter((c: any) => c.id !== req.params.id);
+  const filtered = courses.filter((c) => c.id !== req.params.id);
   if (filtered.length === courses.length) return res.status(404).json({ error: 'Course not found' });
   saveCourses(filtered);
   console.log(`[Courses] Removed course ${req.params.id}`);
@@ -177,7 +176,7 @@ app.delete('/api/courses/:id', (req, res) => {
 
 app.get('/api/courses/:id/browse', (req, res) => {
   const courses = getCourses();
-  const course = courses.find((c: any) => c.id === req.params.id);
+  const course = courses.find((c) => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
   if (!fs.existsSync(course.localPath)) {
@@ -187,7 +186,7 @@ app.get('/api/courses/:id/browse', (req, res) => {
   try {
     const result = scanDirectory(course.localPath, course.localPath);
     res.json({ ...course, ...result });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('[Courses] Browse error:', err);
     res.status(500).json({ error: 'Failed to scan directory' });
   }
@@ -195,7 +194,7 @@ app.get('/api/courses/:id/browse', (req, res) => {
 
 app.get('/api/courses/:id/file', (req, res) => {
   const courses = getCourses();
-  const course = courses.find((c: any) => c.id === req.params.id);
+  const course = courses.find((c) => c.id === req.params.id);
   if (!course) return res.status(404).json({ error: 'Course not found' });
 
   const filePath = req.query.path as string;
@@ -309,3 +308,13 @@ httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`[Nest] Server running on http://localhost:${PORT}`);
   console.log(`[Nest] Data dir: ${DATA_DIR}`);
 });
+
+// ─── Graceful Shutdown ───
+const shutdown = (signal: string) => {
+  console.log(`\n[Nest] ${signal} received — shutting down...`);
+  httpServer.close(() => process.exit(0));
+  // Force exit after 5s if connections don't drain
+  setTimeout(() => process.exit(1), 5000);
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

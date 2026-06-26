@@ -6,6 +6,9 @@ node_modules/
 # Build output
 dist/
 
+# Assets (binary icon shipped via npm files array)
+assets/
+
 # Environment
 .env
 .env.local
