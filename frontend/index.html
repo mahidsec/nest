@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="aetherion-dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Nest — Local Course Viewer</title>
+    <meta name="description" content="Browse and watch local course materials with beautiful Moonlight themes" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪺</text></svg>" />
+    <script>
+      // Set theme before paint to avoid flash
+      (function() {
+        var t = localStorage.getItem('nest_theme');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
