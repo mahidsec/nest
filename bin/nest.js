@@ -2,8 +2,8 @@
 import { spawn, execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
-import { homedir, networkInterfaces } from "os";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "fs";
+import { homedir, networkInterfaces, platform, arch } from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,10 +23,63 @@ const VERSION = "1.0.0";
 const PORT = Number(process.env.PORT) || 6969;
 
 let serverProcess = null;
+let tunnelProcess = null;
+let tunnelUrl = null;
+
+// ─── Cloudflared auto-install ───
+const NEST_BIN_DIR = join(homedir(), ".nest", "bin");
+const CLOUDFLARED_PATH = join(NEST_BIN_DIR, "cloudflared");
+
+function getCloudflaredUrl() {
+  const p = platform(); // linux, darwin
+  const a = arch();     // x64, arm64
+  const osMap = { linux: "linux", darwin: "darwin" };
+  const archMap = { x64: "amd64", arm64: "arm64" };
+  const os = osMap[p] || p;
+  const cpu = archMap[a] || a;
+  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${os}-${cpu}`;
+}
+
+function ensureCloudflared() {
+  // 1. Check system PATH first
+  try {
+    const result = execSync("which cloudflared 2>/dev/null || command -v cloudflared 2>/dev/null").toString().trim();
+    if (result && existsSync(result)) return result;
+  } catch {}
+
+  // 2. Check ~/.nest/bin/cloudflared
+  if (existsSync(CLOUDFLARED_PATH)) return CLOUDFLARED_PATH;
+
+  // 3. Download
+  console.log("  \x1b[33m↓\x1b[0m Downloading cloudflared...");
+  if (!existsSync(NEST_BIN_DIR)) mkdirSync(NEST_BIN_DIR, { recursive: true });
+
+  const url = getCloudflaredUrl();
+  try {
+    execSync(`curl -fSL -o "${CLOUDFLARED_PATH}" "${url}"`, { stdio: "inherit" });
+    chmodSync(CLOUDFLARED_PATH, 0o755);
+    console.log("  \x1b[32m✓\x1b[0m cloudflared installed");
+    return CLOUDFLARED_PATH;
+  } catch {
+    console.log("  \x1b[31m✗\x1b[0m Failed to download cloudflared");
+    console.log("  \x1b[90mInstall manually: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-local-tunnel/\x1b[0m");
+    return null;
+  }
+}
+
+function stopTunnel() {
+  if (tunnelProcess) {
+    try { tunnelProcess.kill("SIGTERM"); } catch {}
+    try { process.kill(-tunnelProcess.pid, "SIGTERM"); } catch {}
+    tunnelProcess = null;
+    tunnelUrl = null;
+  }
+}
 
 const OPTIONS = [
   { label: "\u2605  Web UI (Open in Browser)", action: "webui" },
   { label: "\u2606  Hide to Tray (Background)", action: "background" },
+  { label: "\u2606  Cloudflare Tunnel", action: "tunnel" },
   { label: "\u2606  Exit", action: "exit" },
 ];
 
@@ -43,7 +96,6 @@ function getLocalIP() {
 }
 
 function killServer() {
-  // Always kill by port (handles --tray mode where serverProcess is null)
   killPort(PORT);
   if (serverProcess && serverProcess.pid) {
     try { process.kill(-serverProcess.pid, "SIGTERM"); } catch {}
@@ -56,13 +108,13 @@ function printMenu() {
   const ip = getLocalIP();
   process.stdout.write("\x1B[2J\x1B[0;0H");
   console.log();
-  console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+  console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
   console.log();
   console.log("  \x1b[1;37m  \uD83E\uDEBA Nest \x1b[90m(v" + VERSION + ")\x1b[0m");
   console.log("  \x1b[32m  \uD83D\uDE80 Server: http://" + ip + ":" + PORT + "\x1b[0m");
-  console.log("  \x1b[32m  \u2705 Status: Running\x1b[0m");
+  console.log("  \x1b[32m  \u2705 Status: Running" + (tunnelUrl ? " \x1b[36m|\x1b[0m \U0001F517 Tunnel Active" : "") + "\x1b[0m");
   console.log();
-  console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+  console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
   console.log();
 
   for (let i = 0; i < OPTIONS.length; i++) {
@@ -79,7 +131,6 @@ function printMenu() {
 }
 
 function killPort(port) {
-  // Try lsof first (macOS), then fuser (Linux), then ss fallback
   const cmds = [
     `lsof -ti:${port} 2>/dev/null`,
     `fuser ${port}/tcp 2>/dev/null | tr -s ' '`,
@@ -93,19 +144,21 @@ function killPort(port) {
           const n = Number(pid);
           if (n > 0 && n !== process.pid) try { process.kill(n, "SIGTERM"); } catch {}
         }
-        return; // killed successfully
+        return;
       }
     } catch {}
   }
 }
 
-function startServer() {
+function startServer(tunnel = false) {
   killPort(PORT);
+  const env = { ...process.env };
+  if (tunnel) env.NEST_TUNNEL = "true";
   if (existsSync(distServer)) {
-    serverProcess = spawn("node", [distServer], { stdio: "inherit", detached: true });
+    serverProcess = spawn("node", [distServer], { stdio: "inherit", detached: true, env });
   } else {
     const tsxBin = join(root, "node_modules", ".bin", "tsx");
-    serverProcess = spawn(tsxBin, [join(root, "src", "server.ts")], { stdio: "inherit", detached: true });
+    serverProcess = spawn(tsxBin, [join(root, "src", "server.ts")], { stdio: "inherit", detached: true, env });
   }
   serverProcess.on("error", () => {});
   serverProcess.on("close", () => { serverProcess = null; });
@@ -118,6 +171,93 @@ async function openBrowser() {
   } catch {
     console.log("  \x1b[90mOpen http://localhost:" + PORT + " in your browser\x1b[0m");
   }
+}
+
+// ─── Terminal QR via qrcode package ───
+async function printTerminalQR(text) {
+  try {
+    const QRCode = (await import("qrcode")).default;
+    const qr = await QRCode.toString(text, { type: "terminal", small: true });
+    console.log(qr);
+  } catch {
+    // Fallback: just print the URL
+    console.log("  \x1b[36m" + text + "\x1b[0m");
+  }
+}
+
+// ─── Cloudflare Tunnel ───
+async function startTunnel() {
+  const bin = ensureCloudflared();
+  if (!bin) { printMenu(); return; }
+
+  // Restart server with NEST_TUNNEL=true
+  startServer(true);
+  console.log("  \x1b[33m↻\x1b[0m Restarting server with tunnel support...");
+
+  await new Promise((r) => setTimeout(r, 1500));
+
+  console.log("  \x1b[33m⏳\x1b[0m Starting Cloudflare Tunnel...");
+
+  tunnelProcess = spawn(bin, ["tunnel", "--url", `http://localhost:${PORT}`], {
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+
+  let resolved = false;
+
+  tunnelProcess.stdout.on("data", (data) => {
+    const lines = data.toString().split("\n");
+    for (const line of lines) {
+      const match = line.match(/https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+      if (match && !resolved) {
+        resolved = true;
+        tunnelUrl = match[0];
+
+        // Restart server WITHOUT tunnel env (it's already running with it)
+        // Just show the QR and wait
+        (async () => {
+          process.stdout.write("\x1B[2J\x1B[0;0H");
+          console.log();
+          console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+          console.log();
+          console.log("  \x1b[1;37m  \U0001F310 Cloudflare Tunnel Active\x1b[0m");
+          console.log();
+          await printTerminalQR(tunnelUrl);
+          console.log();
+          console.log("  \x1b[1;36m  " + tunnelUrl + "\x1b[0m");
+          console.log();
+          console.log("  \x1b[90m  Press any key to stop tunnel\x1b[0m");
+          console.log();
+          console.log("  \x1b[35m\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\x1b[0m");
+          console.log();
+        })();
+      }
+    }
+  });
+
+  tunnelProcess.on("close", () => {
+    tunnelProcess = null;
+    tunnelUrl = null;
+  });
+
+  // Wait for any key to stop tunnel
+  const waitForKey = () => {
+    return new Promise((resolve) => {
+      const handler = (key) => {
+        process.stdin.removeListener("data", handler);
+        resolve();
+      };
+      process.stdin.on("data", handler);
+    });
+  };
+
+  await waitForKey();
+
+  // Stop tunnel, restart server normally, show menu
+  stopTunnel();
+  startServer(false);
+  await new Promise((r) => setTimeout(r, 500));
+  printMenu();
 }
 
 // ─── System Tray ───
@@ -174,6 +314,8 @@ function handleSelect() {
   if (opt.action === "webui") {
     openBrowser();
     printMenu();
+  } else if (opt.action === "tunnel") {
+    startTunnel();
   } else if (opt.action === "background") {
     process.stdout.write("\x1B[2J\x1B[0;0H");
     console.log();
@@ -183,7 +325,6 @@ function handleSelect() {
 
     if (serverProcess) serverProcess.unref();
 
-    // Spawn tray in detached background process
     spawn("node", [__filename, "--tray"], {
       stdio: "ignore",
       detached: true,
@@ -194,6 +335,7 @@ function handleSelect() {
     process.stdout.write("\x1B[2J\x1B[0;0H");
     console.log();
     console.log("  \x1b[32m\u2713\x1b[0m Shutting down server...");
+    stopTunnel();
     killServer();
     console.log("  \x1b[90mBye!\x1b[0m");
     console.log();
@@ -204,7 +346,6 @@ function handleSelect() {
 // ─── If --tray flag, just run tray ───
 if (process.argv.includes("--tray")) {
   startTray();
-  // Keep alive
   setInterval(() => {}, 1000 * 60 * 60);
 } else {
   // ─── If --auto flag, start silently ───
@@ -237,6 +378,7 @@ if (process.argv.includes("--tray")) {
         selected = OPTIONS.length - 1;
         handleSelect();
       } else if (key === "\x03") {
+        stopTunnel();
         killServer();
         console.log("\n  \x1b[90mBye!\x1b[0m\n");
         process.exit(0);
@@ -248,6 +390,7 @@ if (process.argv.includes("--tray")) {
   }
 
   process.on("SIGINT", () => {
+    stopTunnel();
     killServer();
     console.log("\n  \x1b[90mBye!\x1b[0m\n");
     process.exit(0);

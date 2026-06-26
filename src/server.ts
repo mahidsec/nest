@@ -5,6 +5,8 @@ import fs from 'fs';
 import { readFile, writeFile, readdir, stat } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { spawn, execSync } from 'child_process';
+import { homedir, platform, arch } from 'os';
 import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from './config.js';
 import type { Course, CourseWithVideos, FileType, FileItem, DirectoryScanResult } from './types.js';
 
@@ -12,12 +14,16 @@ const app = express();
 const httpServer = createServer(app);
 
 const PORT = Number(process.env.PORT) || 6969;
+const IS_TUNNEL = process.env.NEST_TUNNEL === 'true';
 
-// ─── CORS: localhost only ───
+// ─── CORS: localhost only + tunnel support ───
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    if (IS_TUNNEL && /^https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }
     callback(new Error('Not allowed by CORS'));
@@ -176,6 +182,88 @@ const getCourseProgressData = async (): Promise<Record<string, Record<string, bo
 const saveCourseProgressData = async (data: Record<string, Record<string, boolean>>): Promise<void> => {
   await writeFile(COURSE_PROGRESS_PATH, JSON.stringify(data));
 };
+
+// ─── Cloudflare Tunnel (server-side for web UI control) ───
+
+let tunnelChild: ReturnType<typeof spawn> | null = null;
+let tunnelPublicUrl: string | null = null;
+
+function findCloudflared(): string | null {
+  // 1. Check system PATH
+  try {
+    const result = execSync('which cloudflared 2>/dev/null || command -v cloudflared 2>/dev/null').toString().trim();
+    if (result && fs.existsSync(result)) return result;
+  } catch {}
+  // 2. Check ~/.nest/bin/cloudflared
+  const localPath = path.join(homedir(), '.nest', 'bin', 'cloudflared');
+  if (fs.existsSync(localPath)) return localPath;
+  return null;
+}
+
+app.get('/api/tunnel', (_req, res) => {
+  res.json({ active: !!tunnelChild && !!tunnelPublicUrl, url: tunnelPublicUrl });
+});
+
+app.post('/api/tunnel/start', async (_req, res) => {
+  if (tunnelChild) {
+    return res.json({ success: true, url: tunnelPublicUrl });
+  }
+
+  const bin = findCloudflared();
+  if (!bin) {
+    return res.status(400).json({ error: 'cloudflared not found. Run `cloudflared tunnel --url http://localhost:${PORT}` manually or install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-local-tunnel/' });
+  }
+
+  tunnelChild = spawn(bin, ['tunnel', '--url', `http://localhost:${PORT}`], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let resolved = false;
+
+  tunnelChild.stdout?.on('data', (data) => {
+    const lines = data.toString().split('\n');
+    for (const line of lines) {
+      const match = line.match(/https?:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
+      if (match && !resolved) {
+        resolved = true;
+        tunnelPublicUrl = match[0];
+        console.log(`[Tunnel] URL: ${tunnelPublicUrl}`);
+      }
+    }
+  });
+
+  tunnelChild.on('close', () => {
+    tunnelChild = null;
+    tunnelPublicUrl = null;
+  });
+
+  tunnelChild.on('error', (err) => {
+    console.error('[Tunnel] Error:', err);
+    tunnelChild = null;
+    tunnelPublicUrl = null;
+  });
+
+  // Wait up to 15s for URL
+  const start = Date.now();
+  while (!tunnelPublicUrl && Date.now() - start < 15000) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  if (tunnelPublicUrl) {
+    res.json({ success: true, url: tunnelPublicUrl });
+  } else {
+    res.status(500).json({ error: 'Tunnel failed to start (timeout)' });
+  }
+});
+
+app.post('/api/tunnel/stop', (_req, res) => {
+  if (tunnelChild) {
+    try { tunnelChild.kill('SIGTERM'); } catch {}
+    tunnelChild = null;
+    tunnelPublicUrl = null;
+  }
+  res.json({ success: true });
+});
 
 // ─── Course Routes (no auth — local only) ───
 
@@ -368,16 +456,22 @@ app.get('*', (_req, res) => {
 });
 
 // ─── Start ───
-httpServer.listen(PORT, '127.0.0.1', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[Nest] Server running on http://localhost:${PORT}`);
   console.log(`[Nest] Data dir: ${DATA_DIR}`);
+  if (IS_TUNNEL) console.log(`[Nest] Tunnel mode: enabled`);
 });
 
 // ─── Graceful Shutdown ───
 const shutdown = (signal: string) => {
   console.log(`\n[Nest] ${signal} received — shutting down...`);
+  // Stop tunnel on shutdown
+  if (tunnelChild) {
+    try { tunnelChild.kill('SIGTERM'); } catch {}
+    tunnelChild = null;
+    tunnelPublicUrl = null;
+  }
   httpServer.close(() => process.exit(0));
-  // Force exit after 5s if connections don't drain
   setTimeout(() => process.exit(1), 5000);
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
