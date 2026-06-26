@@ -10,15 +10,14 @@
     "build": "cd frontend && npm run build && cd .. && node esbuild.config.mjs",
     "dev:server": "tsx src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
-    "dev": "npm run dev:server"
+    "dev": "npm run dev:server",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "open": "^10.1.0",
-    "socket.io": "^4.8.3",
-    "systray2": "^2.1.4",
-    "tree-kill": "^1.2.2"
+    "systray2": "^2.1.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

@@ -48,12 +48,13 @@ function useIsDark() {
       setIsDark(window.matchMedia('(prefers-color-scheme: dark)').matches);
     };
     window.addEventListener('storage', check);
-    // Also poll for theme toggle (no storage event for same-tab changes)
-    const iv = setInterval(() => {
+    // Watch data-theme attribute changes instead of polling
+    const observer = new MutationObserver(() => {
       const theme = document.documentElement.getAttribute('data-theme') || '';
       setIsDark(theme.endsWith('-dark'));
-    }, 500);
-    return () => { window.removeEventListener('storage', check); clearInterval(iv); };
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => { window.removeEventListener('storage', check); observer.disconnect(); };
   }, []);
   return isDark;
 }

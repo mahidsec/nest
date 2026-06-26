@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 
 const DATA_DIR = join(homedir(), '.nest', 'data');
 const COURSES_PATH = join(DATA_DIR, 'courses.json');

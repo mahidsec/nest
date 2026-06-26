@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
+
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -9,7 +9,7 @@ import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from './config.js';
 
 const app = express();
 const httpServer = createServer(app);
-const io = new SocketIOServer(httpServer, { cors: { origin: '*' } });
+
 const PORT = Number(process.env.PORT) || 6969;
 
 app.use(cors());
@@ -129,11 +129,7 @@ const saveCourseProgressData = (data: Record<string, Record<string, boolean>>) =
   fs.writeFileSync(COURSE_PROGRESS_PATH, JSON.stringify(data));
 };
 
-// ─── Socket.IO ───
-io.on('connection', (socket) => {
-  console.log(`[Socket] Client connected: ${socket.id}`);
-  socket.on('disconnect', () => console.log(`[Socket] Client disconnected: ${socket.id}`));
-});
+
 
 // ─── Course Routes (no auth — local only) ───
 
@@ -309,7 +305,7 @@ app.get('*', (_req, res) => {
 });
 
 // ─── Start ───
-httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`[Nest] Server running on http://localhost:${PORT}`);
   console.log(`[Nest] Data dir: ${DATA_DIR}`);
 });
