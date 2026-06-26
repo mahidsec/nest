@@ -79,14 +79,24 @@ function printMenu() {
 }
 
 function killPort(port) {
-  try {
-    const pids = execSync(`lsof -ti:${port} 2>/dev/null`).toString().trim();
-    if (pids) {
-      for (const pid of pids.split("\n")) {
-        if (pid) try { process.kill(Number(pid), "SIGTERM"); } catch {}
+  // Try lsof first (macOS), then fuser (Linux), then ss fallback
+  const cmds = [
+    `lsof -ti:${port} 2>/dev/null`,
+    `fuser ${port}/tcp 2>/dev/null | tr -s ' '`,
+  ];
+  for (const cmd of cmds) {
+    try {
+      const out = execSync(cmd).toString().trim();
+      if (out) {
+        const pids = out.split(/[\s\n]+/).filter(Boolean);
+        for (const pid of pids) {
+          const n = Number(pid);
+          if (n > 0 && n !== process.pid) try { process.kill(n, "SIGTERM"); } catch {}
+        }
+        return; // killed successfully
       }
-    }
-  } catch {}
+    } catch {}
+  }
 }
 
 function startServer() {
