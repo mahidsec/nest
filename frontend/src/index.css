@@ -1,0 +1,438 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: all;
+}
+
+/* 🌑 Moonlight Dark (Default Dark) */
+@plugin "daisyui/theme" {
+  name: "default-dark";
+  color-scheme: dark;
+  --color-base-100: #0b0b0e;
+  --color-base-200: #141418;
+  --color-base-300: #1e1e24;
+  --color-base-content: #f0f0f5;
+  --color-primary: #7c7cf5;
+  --color-primary-content: #0b0b0e;
+  --color-secondary: #22222a;
+  --color-secondary-content: #d0d0d8;
+  --color-accent: #10b981;
+  --color-accent-content: #0b0b0e;
+  --color-neutral: #1a1a20;
+  --color-neutral-content: #d0d0d8;
+  --color-info: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+  --radius-field: 2px;
+}
+
+/* ☀️ Moonlight Light (Default Light) */
+@plugin "daisyui/theme" {
+  name: "default-light";
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f7f7f9;
+  --color-base-300: #ededf2;
+  --color-base-content: #0b0b0e;
+  --color-primary: #5c5cf2;
+  --color-primary-content: #ffffff;
+  --color-secondary: #f0f0f5;
+  --color-secondary-content: #1a1a20;
+  --color-accent: #059669;
+  --color-accent-content: #ffffff;
+  --color-neutral: #f7f7f9;
+  --color-neutral-content: #1a1a20;
+  --color-info: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+  --radius-field: 2px;
+}
+
+/* 🌸 Sakura Light */
+@plugin "daisyui/theme" {
+  name: "sakura-light";
+  color-scheme: light;
+  --color-base-100: #fffafa;
+  --color-base-200: #fdf2f2;
+  --color-base-300: #fce4e4;
+  --color-base-content: #3a1a1a;
+  --color-primary: #f06292;
+  --color-primary-content: #fffafa;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌸 Sakura Dark */
+@plugin "daisyui/theme" {
+  name: "sakura-dark";
+  color-scheme: dark;
+  --color-base-100: #1a0b0e;
+  --color-base-200: #251014;
+  --color-base-300: #35161d;
+  --color-base-content: #fdf2f2;
+  --color-primary: #f48fb1;
+  --color-primary-content: #1a0b0e;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🍵 Matcha Light */
+@plugin "daisyui/theme" {
+  name: "matcha-light";
+  color-scheme: light;
+  --color-base-100: #fafdff;
+  --color-base-200: #f0f7f0;
+  --color-base-300: #e0efe0;
+  --color-base-content: #1a2a1a;
+  --color-primary: #43a047;
+  --color-primary-content: #fafdff;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🍵 Matcha Dark */
+@plugin "daisyui/theme" {
+  name: "matcha-dark";
+  color-scheme: dark;
+  --color-base-100: #0a120a;
+  --color-base-200: #141e14;
+  --color-base-300: #1e2a1e;
+  --color-base-content: #f0f7f0;
+  --color-primary: #81c784;
+  --color-primary-content: #0a120a;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌌 Starry Light */
+@plugin "daisyui/theme" {
+  name: "starry-light";
+  color-scheme: light;
+  --color-base-100: #f8f8ff;
+  --color-base-200: #f0f0ff;
+  --color-base-300: #e0e0ff;
+  --color-base-content: #0a0a2a;
+  --color-primary: #3f51b5;
+  --color-primary-content: #f8f8ff;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌌 Starry Dark */
+@plugin "daisyui/theme" {
+  name: "starry-dark";
+  color-scheme: dark;
+  --color-base-100: #050510;
+  --color-base-200: #0a0a20;
+  --color-base-300: #101030;
+  --color-base-content: #f0f0ff;
+  --color-primary: #7986cb;
+  --color-primary-content: #050510;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌆 Dusk Light */
+@plugin "daisyui/theme" {
+  name: "dusk-light";
+  color-scheme: light;
+  --color-base-100: #fdfaff;
+  --color-base-200: #f5f0ff;
+  --color-base-300: #efe5ff;
+  --color-base-content: #1a0a2a;
+  --color-primary: #8e24aa;
+  --color-primary-content: #fdfaff;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌆 Dusk Dark */
+@plugin "daisyui/theme" {
+  name: "dusk-dark";
+  color-scheme: dark;
+  --color-base-100: #120a1f;
+  --color-base-200: #1a102a;
+  --color-base-300: #26173b;
+  --color-base-content: #f6edff;
+  --color-primary: #c084fc;
+  --color-primary-content: #120a1f;
+  --color-secondary: #3b1f56;
+  --color-secondary-content: #ecd9ff;
+  --color-accent: #f472b6;
+  --color-accent-content: #120a1f;
+  --color-neutral: #1f1530;
+  --color-neutral-content: #e9ddf7;
+  --color-info: #60a5fa;
+  --color-success: #34d399;
+  --color-warning: #f59e0b;
+  --color-error: #f87171;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+}
+
+/* 🌌 Aurora Light */
+@plugin "daisyui/theme" {
+  name: "aurora-light";
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f0faf4;
+  --color-base-300: #e0f2e9;
+  --color-base-content: #061a1a;
+  --color-primary: #10b981;
+  --color-primary-content: #ffffff;
+  --color-secondary: #0ea5e9;
+  --color-accent: #8b5cf6;
+  --radius-btn: 12px;
+  --radius-box: 20px;
+}
+
+/* 🌌 Aurora Dark */
+@plugin "daisyui/theme" {
+  name: "aurora-dark";
+  color-scheme: dark;
+  --color-base-100: #020a0a;
+  --color-base-200: #0a1a1a;
+  --color-base-300: #142a2a;
+  --color-base-content: #f0faf4;
+  --color-primary: #34d399;
+  --color-primary-content: #020a0a;
+  --color-secondary: #22d3ee;
+  --color-accent: #a78bfa;
+  --radius-btn: 12px;
+  --radius-box: 20px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+@keyframes marquee-flex {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee-flex {
+  animation: marquee-flex 12s linear infinite;
+  width: max-content;
+}
+
+.mask-image-fade {
+  mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.85) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.animate-pop-in {
+  animation: popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes popOut {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.85) translateY(8px); }
+}
+
+.animate-pop-out {
+  animation: popOut 0.3s ease-in forwards;
+  pointer-events: none;
+}
+
+@layer utilities {
+  .glass {
+    background: color-mix(in srgb, var(--color-base-200), transparent 30%);
+    backdrop-filter: blur(30px);
+  }
+  .card-hover {
+    transition: all 0.2s ease;
+  }
+  .card-hover:active {
+    transform: scale(0.98);
+  }
+  .mesh-gradient {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--color-primary);
+    background-image: 
+      radial-gradient(at 0% 0%, var(--color-primary) 0px, transparent 50%),
+      radial-gradient(at 50% 0%, var(--color-accent) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, var(--color-primary) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, var(--color-accent) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, var(--color-primary) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, var(--color-accent) 0px, transparent 50%);
+    background-size: 200% 200%;
+    animation: mesh-move 15s ease infinite alternate;
+  }
+  .aurora-gradient {
+    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    border: none;
+    color: var(--color-primary-content);
+  }
+  
+  .aurora-mesh {
+    background-color: var(--color-base-100);
+    background-image: 
+      radial-gradient(at 0% 0%, color-mix(in srgb, var(--color-primary), transparent 80%) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, color-mix(in srgb, var(--color-secondary), transparent 80%) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, color-mix(in srgb, var(--color-accent), transparent 80%) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, color-mix(in srgb, var(--color-primary), transparent 80%) 0px, transparent 50%);
+  }
+
+  [data-theme^="aurora"] .btn-primary {
+    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    border: none !important;
+    transition: all 0.3s ease;
+  }
+  [data-theme^="aurora"] .btn-primary:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 4px 20px color-mix(in srgb, var(--color-primary), transparent 50%);
+  }
+
+  [data-theme^="aurora"] .chat-bubble-me {
+    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    border: none !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary), transparent 85%);
+  }
+
+  [data-theme^="aurora"] .chat-bubble-them {
+    background-image: linear-gradient(135deg, var(--color-base-300), var(--color-base-200));
+    border: 1px solid color-mix(in srgb, var(--color-primary), transparent 90%) !important;
+  }
+
+  [data-theme^="aurora"] .bg-base-100 {
+    background-color: var(--color-base-100);
+    background-image: 
+      radial-gradient(at 0% 0%, color-mix(in srgb, var(--color-primary), transparent 85%) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, color-mix(in srgb, var(--color-secondary), transparent 85%) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, color-mix(in srgb, var(--color-accent), transparent 85%) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+
+  [data-theme^="aurora"] .card, 
+  [data-theme^="aurora"] .bg-base-200 {
+    background-color: color-mix(in srgb, var(--color-base-200), transparent 20%);
+    backdrop-filter: blur(40px);
+  }
+
+  [data-theme^="aurora"] .btn-primary {
+    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+    border: none !important;
+    color: var(--color-primary-content) !important;
+    transition: all 0.3s ease;
+  }
+
+  [data-theme^="aurora"] .modal-box,
+  [data-theme^="aurora"] .dropdown-content,
+  [data-theme^="aurora"] .absolute.right-0 {
+    background-color: var(--color-base-200) !important;
+    color: var(--color-base-content) !important;
+    backdrop-filter: none !important;
+    opacity: 1 !important;
+  }
+}
+
+@keyframes mesh-move {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 50% 0%; }
+}
+
+@layer base {
+  body {
+    @apply antialiased bg-base-100 text-base-content;
+    font-family: 'Outfit', system-ui, sans-serif;
+  }
+  input, button, textarea {
+    font-family: inherit;
+  }
+  input[type="text"], input[type="password"], textarea {
+    font-size: 16px !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  input[type="text"]:focus, input[type="password"]:focus, input:focus, textarea:focus {
+    border-color: var(--color-primary) !important;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(124, 124, 245, 0.1);
+  border-radius: 10px;
+}
+
+code[class*="language-"],
+pre[class*="language-"] {
+  color: var(--color-base-content);
+  background: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-align: left;
+  white-space: pre;
+  word-spacing: normal;
+  word-break: normal;
+  word-wrap: normal;
+  line-height: 1.6;
+  tab-size: 4;
+  hyphens: none;
+}
+
+.token.comment, .token.prolog, .token.doctype, .token.cdata {
+  color: color-mix(in srgb, var(--color-base-content), transparent 60%);
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: color-mix(in srgb, var(--color-base-content), transparent 40%);
+}
+
+.token.property, .token.tag, .token.boolean, .token.number, .token.constant, .token.symbol, .token.deleted {
+  color: var(--color-primary);
+}
+
+.token.selector, .token.attr-name, .token.string, .token.char, .token.builtin, .token.inserted {
+  color: var(--color-accent);
+}
+
+.token.operator, .token.entity, .token.url {
+  color: var(--color-primary);
+  opacity: 0.8;
+}
+
+.token.atrule, .token.attr-value, .token.keyword {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.token.function, .token.class-name {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.token.regex, .token.important, .token.variable {
+  color: var(--color-warning, #f59e0b);
+}
+
+.token.important, .token.bold { font-weight: bold; }
+.token.italic { font-style: italic; }
+.token.entity { cursor: help; }
