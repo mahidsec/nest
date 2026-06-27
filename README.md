@@ -43,15 +43,19 @@ The server starts at **http://localhost:6969**. Open it from any device on your 
 ## Preview
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/dashboard.png" alt="Nest Dashboard" width="640" />
-</p>
-
-<p align="center">
   <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/home.png" alt="Home View" width="640" />
 </p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/course-adding.png" alt="Course Adding" width="640" />
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/dashboard.png" alt="Nest Dashboard" width="640" />
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/navigation.png" alt="Navigation" width="640" />
 </p>
 
 ## Features
