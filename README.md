@@ -1,139 +1,136 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Nest Logo" width="128" />
+  <img src="assets/icon.png" alt="Nest" width="128" />
 </p>
 
 <h1 align="center">Nest</h1>
 
 <p align="center">
-  A local course viewer with system tray integration, built with Express and React.
+  A beautiful local course viewer with system tray, tunneling, and progress tracking.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version" />
-  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node.js" />
-  <img src="https://img.shields.io/badge/typescript-5.x-3178c6" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/react-19-61dafb" alt="React" />
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
+  <a href="https://www.npmjs.com/package/@mahidsec/nest"><img src="https://img.shields.io/npm/v/@mahidsec/nest?label=npm&logo=npm" alt="npm version" /></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
 </p>
 
 ---
 
+Browse and watch local course materials with beautiful themes, inline file previews, watch progress tracking, and one-click Cloudflare tunneling.
+
 ## Install
-
-**Option 1 — npx (no install needed):**
-
-```bash
-npx @mahidsec/nest
-```
-
-**Option 2 — global install:**
 
 ```bash
 npm install -g @mahidsec/nest
+```
+
+Then just run:
+
+```bash
 nest
 ```
 
-**Option 3 — from source:**
+The server starts at **http://localhost:6969**. Open it from any device on your network using your local IP.
+
+> On first run, Nest will automatically download [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) if you choose to start a tunnel.
+
+## Features
+
+- **Course Management** — Import folders, organize by categories, track watch progress
+- **File Viewer** — Inline preview for videos, images, PDFs, code, markdown, and CSV
+- **Curriculum Sidebar** — Collapsible sections with progress tracking and expand/collapse all
+- **Cloudflare Tunnel** — One-click tunneling from both CLI and web UI
+- **QR Code** — In-browser QR generation for sharing tunnel URLs (no external APIs)
+- **System Tray** — Runs in the background with a native tray icon
+- **Multiple Themes** — Moonlight, Sakura, Matcha, Starry, Dusk, Aurora (dark & light)
+- **Mobile Responsive** — Adaptive layout with touch-friendly navigation
+- **LAN Access** — Open from any device on your network
+
+## CLI Menu
+
+```
+  🪺 Nest (v1.0.0)
+  🚀 Server: http://192.168.x.x:6969
+  ✅ Status: Running
+
+  ★  Web UI (Open in Browser)
+  ☆  Hide to Tray (Background)
+  ☆  Cloudflare Tunnel
+  ☆  Exit
+```
+
+| Option                | Description                           |
+| --------------------- | ------------------------------------- |
+| **Web UI**            | Opens the app in your default browser |
+| **Hide to Tray**      | Runs in background via system tray    |
+| **Cloudflare Tunnel** | Creates a public URL with QR code     |
+| **Exit**              | Gracefully shuts down the server      |
+
+## Data Storage
+
+All data is stored locally:
+
+```
+~/.nest/data/
+├── courses.json           # Course registry
+└── course_progress.json   # Watch progress per course
+```
+
+## Contributing
+
+Clone and run locally:
 
 ```bash
 git clone https://github.com/mahidsec/nest.git
 cd nest
 npm install
 cd frontend && npm install && cd ..
+```
+
+**Development:**
+
+```bash
+npm run dev            # Server with hot reload
+npm run dev:frontend   # Frontend dev server (separate terminal)
+```
+
+**Production build:**
+
+```bash
 npm run build
 npm start
 ```
 
-The server starts at **http://localhost:6969**. Open from any device on your network: **http://\<your-ip\>:6969**.
-
-> On first run, Nest will download [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) automatically if you want to use the tunnel feature.
-
-## Features
-
-- **Course Management** — Import folders, organize by categories, track watch progress
-- **File Viewer** — Inline preview for videos, images, PDFs, code, markdown, and CSV
-- **Curriculum Sidebar** — Collapsible sections with progress tracking, snake-line tree UI, and expand/collapse all
-- **Cloudflare Tunnel** — One-click tunneling from both CLI and web UI (auto-downloads cloudflared)
-- **QR Code** — Generated in-browser for easy mobile sharing of tunnel URLs (no external APIs)
-- **System Tray** — Runs in the background with a native tray icon (cross-platform)
-- **Multiple Themes** — Moonlight, Sakura, Matcha, Starry, Dusk, Aurora (dark/light)
-- **Mobile Responsive** — Adaptive layout with touch-friendly navigation, collapsed controls on small screens
-- **Natural Sorting** — Intelligent numeric ordering for course sections
-- **LAN Access** — Open from any device on your network
-
-## Tech Stack
-
-| Layer    | Technology                                           |
-| -------- | ---------------------------------------------------- |
-| Backend  | Express, TypeScript                                  |
-| Frontend | React 19, Vite, DaisyUI, Tailwind CSS                |
-| Icons    | Lucide React                                         |
-| QR Code  | `qrcode` (client-side, no external requests)         |
-| Build    | Vite, esbuild                                        |
-| CLI      | Interactive menu with system tray via `systray2`     |
-| Tunnel   | Cloudflare Tunnel via `cloudflared` (auto-installed) |
-
-## CLI Menu
-
-```
-═══════════════════════════════════════════
-  🪺 Nest (v1.0.0)
-  🚀 Server: http://192.168.x.x:6969
-  ✅ Status: Running
-═══════════════════════════════════════════
-  ★  Web UI (Open in Browser)
-  ☆  Hide to Tray (Background)
-  ☆  Cloudflare Tunnel
-  ☆  Exit
-═══════════════════════════════════════════
-```
-
-- **Web UI** — Opens in browser
-- **Hide to Tray** — Runs in background via system tray
-- **Cloudflare Tunnel** — Creates a public URL with QR code
-- **Exit** — Gracefully shuts down server and frees the port
-
-## Development
-
-```bash
-# Run server in dev mode (with hot reload)
-npm run dev
-
-# Run frontend dev server separately
-npm run dev:frontend
-```
-
-## Project Structure
+**Project structure:**
 
 ```
 nest/
-├── assets/            # Static assets (icons)
+├── assets/              # Icons and static assets
 ├── bin/
-│   └── nest.js        # CLI entry point with menu and tray
-├── dist/              # Compiled backend output
-├── frontend/
-│   ├── dist/          # Built frontend
+│   └── nest.js          # CLI entry point
+├── frontend/            # React + Vite frontend
 │   └── src/
-│       ├── App.tsx    # Main application component
-│       └── index.css  # DaisyUI + custom themes
+│       ├── App.tsx      # Main application
+│       └── index.css    # Themes and styles
 ├── src/
-│   ├── config.ts      # Paths & data directory setup
-│   ├── server.ts      # Express API, tunnel, file serving
-│   └── types.ts       # TypeScript type definitions
-├── esbuild.config.mjs # Backend build config
+│   ├── config.ts        # Paths and data directory setup
+│   ├── server.ts        # Express API and tunnel
+│   └── types.ts         # TypeScript types
+├── esbuild.config.mjs   # Backend build config
 └── package.json
 ```
 
-## Data Storage
+## Tech Stack
 
-Course data and progress are stored locally at:
-
-```
-~/.nest/data/
-├── courses.json           # Course registry
-└── course_progress.json   # Per-course progress tracking
-```
+| Layer    | Technology                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Backend  | [Express](https://expressjs.com), [TypeScript](https://www.typescriptlang.org)                                                     |
+| Frontend | [React 19](https://react.dev), [Vite](https://vitejs.dev), [DaisyUI](https://daisyui.com), [Tailwind CSS](https://tailwindcss.com) |
+| Icons    | [Lucide React](https://lucide.dev)                                                                                                 |
+| QR Code  | [qrcode](https://www.npmjs.com/package/qrcode) (client-side)                                                                       |
+| Tunnel   | [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) via `cloudflared`              |
+| Tray     | [systray2](https://www.npmjs.com/package/systray2)                                                                                 |
 
 ## License
 
-MIT
+[MIT](LICENSE)
