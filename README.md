@@ -22,17 +22,7 @@
 
 Browse and watch local course materials with beautiful themes, inline file previews, watch progress tracking, and one-click Cloudflare tunneling.
 
-## Preview
-
-<p align="center">
-  <img src="screenshots/dashboard.png" alt="Nest Dashboard" width="800" />
-</p>
-
-<p align="center">
-  <img src="screenshots/home.png" alt="Home View" width="400" />
-  &nbsp;&nbsp;
-  <img src="screenshots/course-adding.png" alt="Course Adding" width="400" />
-</p>
+**[Install](#install)** · **[Preview](#preview)** · **[Features](#features)** · **[CLI Menu](#cli-menu)** · **[FAQ](#faq)** · **[Changelog](#changelog)** · **[Contributing](#contributing)**
 
 ## Install
 
@@ -49,6 +39,20 @@ nest
 The server starts at **http://localhost:6969**. Open it from any device on your network using your local IP.
 
 > On first run, Nest will automatically download [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) if you choose to start a tunnel.
+
+## Preview
+
+<p align="center">
+  <img src="screenshots/dashboard.png" alt="Nest Dashboard" width="640" />
+</p>
+
+<p align="center">
+  <img src="screenshots/home.png" alt="Home View" width="640" />
+</p>
+
+<p align="center">
+  <img src="screenshots/course-adding.png" alt="Course Adding" width="640" />
+</p>
 
 ## Features
 
