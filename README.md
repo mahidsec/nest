@@ -22,7 +22,7 @@
 
 Browse and watch local course materials with beautiful themes, inline file previews, watch progress tracking, and one-click Cloudflare tunneling.
 
-**[Install](#install)** · **[Preview](#preview)** · **[Features](#features)** · **[CLI Menu](#cli-menu)** · **[FAQ](#faq)** · **[Changelog](#changelog)** · **[Contributing](#contributing)**
+**[Install](#install)** · **[Preview](#preview)** · **[Features](#features)** · **[CLI Menu](#cli-menu)** · **[FAQ](#faq)** · **[Contributing](#contributing)**
 
 ## Install
 
@@ -113,23 +113,6 @@ The server shuts down gracefully — it closes all connections, stops any active
 **Does it work on Windows/Linux/macOS?**
 
 Yes. Nest works on all three platforms. The system tray feature requires a desktop environment. On headless servers, the CLI menu still works.
-
-## Changelog
-
-### 1.0.0
-
-Initial release.
-
-- Course management with folder import and progress tracking
-- File browser with curriculum sidebar and snake-line tree UI
-- Inline previews for videos, images, code, markdown, PDFs, and CSV
-- Cloudflare Tunnel integration (auto-downloads cloudflared)
-- QR code generation (client-side, no external APIs)
-- System tray support via systray2
-- 6 built-in themes (dark & light modes)
-- Mobile responsive design
-- LAN access from any device
-- CLI with interactive keyboard navigation
 
 ## Data Storage
 
