@@ -59,18 +59,8 @@ const saveCourses = async (courses: Course[]): Promise<void> => {
   await rename(tmp, COURSES_PATH);
 };
 
-const naturalCompare = (a: string, b: string): number => {
-  const ax: (string | number)[] = [];
-  const bx: (string | number)[] = [];
-  a.replace(/(\d+)|(\D+)/g, (_: string, n: string, s: string) => { ax.push(n ? parseInt(n, 10) : s); return ''; });
-  b.replace(/(\d+)|(\D+)/g, (_: string, n: string, s: string) => { bx.push(n ? parseInt(n, 10) : s); return ''; });
-  for (let i = 0; i < Math.max(ax.length, bx.length); i++) {
-    const ai = ax[i] ?? ''; const bi = bx[i] ?? '';
-    if (typeof ai === 'number' && typeof bi === 'number') { if (ai !== bi) return ai - bi; }
-    else { const cmp = String(ai).localeCompare(String(bi)); if (cmp !== 0) return cmp; }
-  }
-  return 0;
-};
+const naturalCompare = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
 const HIDDEN_EXTS = ['.srt', '.sub', '.ass', '.ssa', '.idx', '.vtt'];
 
