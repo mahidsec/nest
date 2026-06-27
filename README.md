@@ -14,9 +14,25 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
 </p>
 
+<p align="center">
+  If you find Nest useful, give it a ⭐ on <a href="https://github.com/mahidsec/nest">GitHub</a> — it helps others discover it!
+</p>
+
 ---
 
 Browse and watch local course materials with beautiful themes, inline file previews, watch progress tracking, and one-click Cloudflare tunneling.
+
+## Preview
+
+<p align="center">
+  <img src="screenshots/dashboard.png" alt="Nest Dashboard" width="800" />
+</p>
+
+<p align="center">
+  <img src="screenshots/home.png" alt="Home View" width="400" />
+  &nbsp;&nbsp;
+  <img src="screenshots/themes.png" alt="Themes" width="400" />
+</p>
 
 ## Install
 
@@ -66,6 +82,51 @@ The server starts at **http://localhost:6969**. Open it from any device on your 
 | **Cloudflare Tunnel** | Creates a public URL with QR code     |
 | **Exit**              | Gracefully shuts down the server      |
 
+Use ↑/↓ arrow keys to navigate and Enter to select.
+
+## FAQ
+
+**Why is port 6969 used?**
+
+It's the default port. You can override it by setting the `PORT` environment variable: `PORT=3000 nest`.
+
+**Does Nest send any data externally?**
+
+No. All data stays on your machine. The only external connection is when you explicitly start a Cloudflare Tunnel — that connection goes directly to Cloudflare's edge network. No telemetry, no analytics, no phone-home.
+
+**Can I access Nest from my phone/tablet?**
+
+Yes. Open `http://<your-local-ip>:6969` on any device on the same network. For remote access, use the built-in Cloudflare Tunnel feature.
+
+**What file types can Nest preview?**
+
+Videos (mp4, mkv, webm, mov, avi), images (jpg, png, gif, webp), code (js, ts, py, java, c, cpp, go, rs, and 20+ more), text (txt, md, csv, log), PDFs, and link files (.url, .webloc).
+
+**What happens if I exit the CLI?**
+
+The server shuts down gracefully — it closes all connections, stops any active tunnel, and frees the port.
+
+**Does it work on Windows/Linux/macOS?**
+
+Yes. Nest works on all three platforms. The system tray feature requires a desktop environment. On headless servers, the CLI menu still works.
+
+## Changelog
+
+### 1.0.0
+
+Initial release.
+
+- Course management with folder import and progress tracking
+- File browser with curriculum sidebar and snake-line tree UI
+- Inline previews for videos, images, code, markdown, PDFs, and CSV
+- Cloudflare Tunnel integration (auto-downloads cloudflared)
+- QR code generation (client-side, no external APIs)
+- System tray support via systray2
+- 6 built-in themes (dark & light modes)
+- Mobile responsive design
+- LAN access from any device
+- CLI with interactive keyboard navigation
+
 ## Data Storage
 
 All data is stored locally:
@@ -112,6 +173,7 @@ nest/
 │   └── src/
 │       ├── App.tsx      # Main application
 │       └── index.css    # Themes and styles
+├── screenshots/         # UI screenshots
 ├── src/
 │   ├── config.ts        # Paths and data directory setup
 │   ├── server.ts        # Express API and tunnel
