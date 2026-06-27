@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Nest" width="128" />
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/assets/icon.png" alt="Nest" width="128" />
 </p>
 
 <h1 align="center">Nest</h1>
@@ -43,15 +43,15 @@ The server starts at **http://localhost:6969**. Open it from any device on your 
 ## Preview
 
 <p align="center">
-  <img src="screenshots/dashboard.png" alt="Nest Dashboard" width="640" />
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/dashboard.png" alt="Nest Dashboard" width="640" />
 </p>
 
 <p align="center">
-  <img src="screenshots/home.png" alt="Home View" width="640" />
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/home.png" alt="Home View" width="640" />
 </p>
 
 <p align="center">
-  <img src="screenshots/course-adding.png" alt="Course Adding" width="640" />
+  <img src="https://raw.githubusercontent.com/mahidsec/nest/main/screenshots/course-adding.png" alt="Course Adding" width="640" />
 </p>
 
 ## Features

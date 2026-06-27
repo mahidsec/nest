@@ -37,6 +37,7 @@
     "dist/",
     "src/",
     "frontend/dist/",
-    "assets/"
+    "assets/",
+    "screenshots/"
   ]
 }
