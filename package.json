@@ -1,6 +1,6 @@
 {
   "name": "@mahidsec/nest",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Standalone local course viewer with Moonlight themes",
   "type": "module",
   "bin": {
