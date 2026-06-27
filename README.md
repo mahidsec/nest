@@ -31,7 +31,7 @@ Browse and watch local course materials with beautiful themes, inline file previ
 <p align="center">
   <img src="screenshots/home.png" alt="Home View" width="400" />
   &nbsp;&nbsp;
-  <img src="screenshots/themes.png" alt="Themes" width="400" />
+  <img src="screenshots/course-adding.png" alt="Course Adding" width="400" />
 </p>
 
 ## Install
