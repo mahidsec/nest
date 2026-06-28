@@ -4,7 +4,7 @@
   "description": "Standalone local course viewer with Moonlight themes",
   "type": "module",
   "bin": {
-    "nest": "./bin/nest.js"
+    "nestviewer": "./bin/nest.js"
   },
   "scripts": {
     "build": "cd frontend && npm run build && cd .. && node esbuild.config.mjs",
