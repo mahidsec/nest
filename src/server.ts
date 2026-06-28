@@ -199,16 +199,12 @@ function findCloudflared(): string | null {
   } catch {}
   // 2. Check ~/.nest/bin/cloudflared
   if (fs.existsSync(CLOUDFLARED_PATH)) return CLOUDFLARED_PATH;
-  // 3. Auto-download
-  console.log('[Tunnel] cloudflared not found — downloading...');
   try {
     if (!fs.existsSync(NEST_BIN_DIR)) fs.mkdirSync(NEST_BIN_DIR, { recursive: true });
     execSync(`curl -fSL -o "${CLOUDFLARED_PATH}" "${getCloudflaredDownloadUrl()}"`, { stdio: 'inherit' });
     fs.chmodSync(CLOUDFLARED_PATH, 0o755);
-    console.log('[Tunnel] cloudflared installed');
     return CLOUDFLARED_PATH;
   } catch {
-    console.error('[Tunnel] Failed to download cloudflared');
     return null;
   }
 }
@@ -295,8 +291,7 @@ app.get('/api/courses', async (_req, res) => {
       totalVideos: await getCachedVideoCount(c.localPath),
     })));
     res.json(enriched);
-  } catch (err) {
-    console.error('[Courses] List error:', err);
+  } catch {
     res.status(500).json({ error: 'Failed to load courses' });
   }
 });
@@ -333,7 +328,6 @@ app.post('/api/courses', async (req, res) => {
   courses.push(course);
   await saveCourses(courses);
   invalidateVideoCount(resolved);
-  console.log(`[Courses] Added "${name}" → ${resolved}`);
   res.json({ success: true, course });
 });
 
@@ -343,7 +337,6 @@ app.delete('/api/courses/:id', async (req, res) => {
   if (!target) return res.status(404).json({ error: 'Course not found' });
   invalidateVideoCount(target.localPath);
   await saveCourses(courses.filter((c) => c.id !== req.params.id));
-  console.log(`[Courses] Removed course ${req.params.id}`);
   res.json({ success: true });
 });
 
@@ -362,8 +355,7 @@ app.get('/api/courses/:id/browse', async (req, res) => {
     const result = await scanDirectory(course.localPath, course.localPath);
     invalidateVideoCount(course.localPath);
     res.json({ ...course, ...result });
-  } catch (err: unknown) {
-    console.error('[Courses] Browse error:', err);
+  } catch {
     res.status(500).json({ error: 'Failed to scan directory' });
   }
 });
@@ -463,8 +455,7 @@ app.get('/api/courses/:id/file', async (req, res) => {
     'Cache-Control': 'public, max-age=3600',
   });
   safePipe(fs.createReadStream(realResolved), res);
-  } catch (err) {
-    console.error('[Courses] File error:', err);
+  } catch {
     res.status(500).json({ error: 'Failed to serve file' });
   }
 });
@@ -500,11 +491,7 @@ app.get('*', (_req, res) => {
 });
 
 // ─── Start ───
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Nest] Server running on http://localhost:${PORT}`);
-  console.log(`[Nest] Data dir: ${DATA_DIR}`);
-  if (IS_TUNNEL) console.log(`[Nest] Tunnel mode: enabled`);
-});
+httpServer.listen(PORT, '0.0.0.0', () => {});
 
 // ─── Graceful Shutdown ───
 let shuttingDown = false;

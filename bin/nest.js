@@ -314,7 +314,12 @@ async function handleSelect() {
     console.log("  \x1b[90mServer: http://localhost:" + PORT + "\x1b[0m");
     console.log();
 
-    if (serverProcess) serverProcess.unref();
+    // Redirect server stdout/stderr so logs don't leak to terminal
+    if (serverProcess) {
+      serverProcess.stdout?.destroy();
+      serverProcess.stderr?.destroy();
+      serverProcess.unref();
+    }
 
     spawn("node", [__filename, "--tray"], {
       stdio: "ignore",
