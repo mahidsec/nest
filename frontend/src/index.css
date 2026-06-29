@@ -139,74 +139,104 @@
   --radius-box: 2px;
 }
 
-/* 🌆 Dusk Light */
+/* 🩷 Cotton Light */
 @plugin "daisyui/theme" {
-  name: "dusk-light";
+  name: "cotton-light";
   color-scheme: light;
-  --color-base-100: #fdfaff;
-  --color-base-200: #f5f0ff;
-  --color-base-300: #efe5ff;
-  --color-base-content: #1a0a2a;
-  --color-primary: #8e24aa;
-  --color-primary-content: #fdfaff;
+  --color-base-100: #F5F0EB;
+  --color-base-200: #EDEBDE;
+  --color-base-300: #E0D8CC;
+  --color-base-content: #1B1716;
+  --color-primary: #810100;
+  --color-primary-content: #F5F0EB;
+  --color-secondary: #630102;
+  --color-secondary-content: #EDEBDE;
+  --color-accent: #B81816;
+  --color-accent-content: #F5F0EB;
+  --color-neutral: #EDEBDE;
+  --color-neutral-content: #1B1716;
+  --color-info: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #810100;
   --radius-btn: 2px;
   --radius-box: 2px;
+  --radius-field: 2px;
 }
 
-/* 🌆 Dusk Dark */
+/* 🩷 Cotton Dark */
 @plugin "daisyui/theme" {
-  name: "dusk-dark";
+  name: "cotton-dark";
   color-scheme: dark;
-  --color-base-100: #120a1f;
-  --color-base-200: #1a102a;
-  --color-base-300: #26173b;
-  --color-base-content: #f6edff;
-  --color-primary: #c084fc;
-  --color-primary-content: #120a1f;
-  --color-secondary: #3b1f56;
-  --color-secondary-content: #ecd9ff;
-  --color-accent: #f472b6;
-  --color-accent-content: #120a1f;
-  --color-neutral: #1f1530;
-  --color-neutral-content: #e9ddf7;
+  --color-base-100: #1B1716;
+  --color-base-200: #2A2321;
+  --color-base-300: #3A3230;
+  --color-base-content: #EDEBDE;
+  --color-primary: #C41A18;
+  --color-primary-content: #1B1716;
+  --color-secondary: #8A1514;
+  --color-secondary-content: #EDEBDE;
+  --color-accent: #E52D2B;
+  --color-accent-content: #1B1716;
+  --color-neutral: #2A2321;
+  --color-neutral-content: #EDEBDE;
   --color-info: #60a5fa;
   --color-success: #34d399;
   --color-warning: #f59e0b;
-  --color-error: #f87171;
+  --color-error: #E52D2B;
   --radius-btn: 2px;
   --radius-box: 2px;
+  --radius-field: 2px;
 }
 
-/* 🌌 Aurora Light */
+/* 🔥 Ember Light */
 @plugin "daisyui/theme" {
-  name: "aurora-light";
+  name: "ember-light";
   color-scheme: light;
-  --color-base-100: #ffffff;
-  --color-base-200: #f0faf4;
-  --color-base-300: #e0f2e9;
-  --color-base-content: #061a1a;
-  --color-primary: #10b981;
-  --color-primary-content: #ffffff;
-  --color-secondary: #0ea5e9;
-  --color-accent: #8b5cf6;
-  --radius-btn: 12px;
-  --radius-box: 20px;
+  --color-base-100: #FDF8F0;
+  --color-base-200: #F5EDE0;
+  --color-base-300: #E8D8C0;
+  --color-base-content: #3D1202;
+  --color-primary: #E58423;
+  --color-primary-content: #3D1202;
+  --color-secondary: #BA3D03;
+  --color-secondary-content: #FDF8F0;
+  --color-accent: #E8C581;
+  --color-accent-content: #3D1202;
+  --color-neutral: #F5EDE0;
+  --color-neutral-content: #3D1202;
+  --color-info: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #BA3D03;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+  --radius-field: 2px;
 }
 
-/* 🌌 Aurora Dark */
+/* 🔥 Ember Dark */
 @plugin "daisyui/theme" {
-  name: "aurora-dark";
+  name: "ember-dark";
   color-scheme: dark;
-  --color-base-100: #020a0a;
-  --color-base-200: #0a1a1a;
-  --color-base-300: #142a2a;
-  --color-base-content: #f0faf4;
-  --color-primary: #34d399;
-  --color-primary-content: #020a0a;
-  --color-secondary: #22d3ee;
-  --color-accent: #a78bfa;
-  --radius-btn: 12px;
-  --radius-box: 20px;
+  --color-base-100: #2A0F05;
+  --color-base-200: #3D1202;
+  --color-base-300: #5A1E08;
+  --color-base-content: #E8C581;
+  --color-primary: #E58423;
+  --color-primary-content: #2A0F05;
+  --color-secondary: #BA3D03;
+  --color-secondary-content: #E8C581;
+  --color-accent: #F0A050;
+  --color-accent-content: #2A0F05;
+  --color-neutral: #3D1202;
+  --color-neutral-content: #E8C581;
+  --color-info: #60a5fa;
+  --color-success: #34d399;
+  --color-warning: #f59e0b;
+  --color-error: #BA3D03;
+  --radius-btn: 2px;
+  --radius-box: 2px;
+  --radius-field: 2px;
 }
 
 @keyframes fadeIn {
@@ -277,73 +307,7 @@
     background-size: 200% 200%;
     animation: mesh-move 15s ease infinite alternate;
   }
-  .aurora-gradient {
-    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    border: none;
-    color: var(--color-primary-content);
-  }
-  
-  .aurora-mesh {
-    background-color: var(--color-base-100);
-    background-image: 
-      radial-gradient(at 0% 0%, color-mix(in srgb, var(--color-primary), transparent 80%) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, color-mix(in srgb, var(--color-secondary), transparent 80%) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, color-mix(in srgb, var(--color-accent), transparent 80%) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, color-mix(in srgb, var(--color-primary), transparent 80%) 0px, transparent 50%);
-  }
 
-  [data-theme^="aurora"] .btn-primary {
-    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    border: none !important;
-    transition: all 0.3s ease;
-  }
-  [data-theme^="aurora"] .btn-primary:hover {
-    filter: brightness(1.1);
-    box-shadow: 0 4px 20px color-mix(in srgb, var(--color-primary), transparent 50%);
-  }
-
-  [data-theme^="aurora"] .chat-bubble-me {
-    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    border: none !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-primary), transparent 85%);
-  }
-
-  [data-theme^="aurora"] .chat-bubble-them {
-    background-image: linear-gradient(135deg, var(--color-base-300), var(--color-base-200));
-    border: 1px solid color-mix(in srgb, var(--color-primary), transparent 90%) !important;
-  }
-
-  [data-theme^="aurora"] .bg-base-100 {
-    background-color: var(--color-base-100);
-    background-image: 
-      radial-gradient(at 0% 0%, color-mix(in srgb, var(--color-primary), transparent 85%) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, color-mix(in srgb, var(--color-secondary), transparent 85%) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, color-mix(in srgb, var(--color-accent), transparent 85%) 0px, transparent 50%);
-    background-attachment: fixed;
-  }
-
-  [data-theme^="aurora"] .card, 
-  [data-theme^="aurora"] .bg-base-200 {
-    background-color: color-mix(in srgb, var(--color-base-200), transparent 20%);
-    backdrop-filter: blur(40px);
-  }
-
-  [data-theme^="aurora"] .btn-primary {
-    background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-    border: none !important;
-    color: var(--color-primary-content) !important;
-    transition: all 0.3s ease;
-  }
-
-  [data-theme^="aurora"] .modal-box,
-  [data-theme^="aurora"] .dropdown-content,
-  [data-theme^="aurora"] .absolute.right-0 {
-    background-color: var(--color-base-200) !important;
-    color: var(--color-base-content) !important;
-    backdrop-filter: none !important;
-    opacity: 1 !important;
-  }
 }
 
 @keyframes mesh-move {

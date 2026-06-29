@@ -42,6 +42,7 @@ import {
   QrCode,
   Globe2,
   Settings,
+  Play,
 } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-clike";
@@ -55,6 +56,8 @@ import "prismjs/components/prism-markdown";
 import "prismjs/components/prism-c";
 import "prismjs/components/prism-cpp";
 import "prismjs/components/prism-java";
+import "prismjs/components/prism-markup";
+import "prismjs/components/prism-rust";
 import "prismjs/themes/prism-tomorrow.css";
 
 // ─── Local Type Definitions ───
@@ -97,8 +100,8 @@ const THEME_LIST = [
   { name: "sakura", label: "Sakura", icon: "🌸" },
   { name: "matcha", label: "Matcha", icon: "🍵" },
   { name: "starry", label: "Starry", icon: "🌌" },
-  { name: "dusk", label: "Dusk", icon: "🌆" },
-  { name: "aurora", label: "Aurora", icon: "🌌" },
+  { name: "cotton", label: "Cotton", icon: "🩷" },
+  { name: "ember", label: "Ember", icon: "🔥" },
 ];
 
 const COURSE_ICON_MAP: Record<
@@ -180,46 +183,6 @@ function useIsDark() {
   return isDark;
 }
 
-const COURSE_GRADIENTS: Record<string, string> = {
-  BookOpen: "from-blue-600/30 to-indigo-900/60",
-  Code: "from-emerald-600/30 to-cyan-900/60",
-  Zap: "from-yellow-500/30 to-amber-900/60",
-  Music: "from-pink-500/30 to-purple-900/60",
-  Languages: "from-sky-500/30 to-blue-900/60",
-  DollarSign: "from-green-500/30 to-emerald-900/60",
-  Paintbrush: "from-rose-500/30 to-pink-900/60",
-  Microscope: "from-teal-500/30 to-cyan-900/60",
-  BarChart3: "from-violet-500/30 to-purple-900/60",
-  Dumbbell: "from-orange-500/30 to-red-900/60",
-  Camera: "from-amber-500/30 to-yellow-900/60",
-  Gamepad2: "from-indigo-500/30 to-violet-900/60",
-  Brain: "from-fuchsia-500/30 to-pink-900/60",
-  Scale: "from-slate-500/30 to-gray-900/60",
-  HeartPulse: "from-red-500/30 to-rose-900/60",
-  Wrench: "from-zinc-500/30 to-stone-900/60",
-  GraduationCap: "from-blue-500/30 to-sky-900/60",
-  Briefcase: "from-neutral-500/30 to-slate-900/60",
-};
-const COURSE_GRADIENTS_LIGHT: Record<string, string> = {
-  BookOpen: "from-blue-500/70 to-indigo-700/90",
-  Code: "from-emerald-500/70 to-cyan-700/90",
-  Zap: "from-yellow-400/70 to-amber-600/90",
-  Music: "from-pink-500/70 to-purple-700/90",
-  Languages: "from-sky-400/70 to-blue-700/90",
-  DollarSign: "from-green-500/70 to-emerald-700/90",
-  Paintbrush: "from-rose-500/70 to-pink-700/90",
-  Microscope: "from-teal-500/70 to-cyan-700/90",
-  BarChart3: "from-violet-500/70 to-purple-700/90",
-  Dumbbell: "from-orange-500/70 to-red-700/90",
-  Camera: "from-amber-400/70 to-yellow-600/90",
-  Gamepad2: "from-indigo-500/70 to-violet-700/90",
-  Brain: "from-fuchsia-500/70 to-pink-700/90",
-  Scale: "from-slate-500/70 to-gray-700/90",
-  HeartPulse: "from-red-500/70 to-rose-700/90",
-  Wrench: "from-zinc-500/70 to-stone-700/90",
-  GraduationCap: "from-blue-400/70 to-sky-700/90",
-  Briefcase: "from-neutral-500/70 to-slate-700/90",
-};
 
 function countVideos(items: FileItem[]): number {
   return items.reduce(
@@ -398,28 +361,27 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
 // ─── Course Card ───
 function CourseCard({
   course,
+  watchedCount,
   onClick,
   onDelete,
 }: {
   course: CourseWithVideos;
+  watchedCount: number;
   onClick: () => void;
   onDelete: () => void;
 }) {
-  const isDark = useIsDark();
-  const gradient =
-    (isDark ? COURSE_GRADIENTS : COURSE_GRADIENTS_LIGHT)[course.icon] ||
-    (isDark ? COURSE_GRADIENTS.BookOpen : COURSE_GRADIENTS_LIGHT.BookOpen);
+  const pct = course.totalVideos > 0 ? Math.round((watchedCount / course.totalVideos) * 100) : 0;
   return (
     <button
       onClick={onClick}
-      className={`relative flex flex-col p-4 bg-gradient-to-br ${gradient} border border-base-300 rounded-md card-hover text-left overflow-hidden group`}
+      className="relative flex flex-col p-4 bg-base-200 border border-base-300 rounded-md card-hover text-left overflow-hidden group"
     >
       <div className="flex items-start justify-between mb-3">
-        <div className="p-2 rounded-lg bg-base-100/20">
+        <div className="p-2 rounded-lg bg-primary">
           <CourseIcon
             iconKey={course.icon}
             size={20}
-            className="text-primary"
+            className="text-primary-content"
           />
         </div>
         <button
@@ -438,8 +400,15 @@ function CourseCard({
           {course.subtitle}
         </div>
       )}
-      <div className="text-[9px] font-bold uppercase tracking-widest opacity-40 mt-auto">
-        {course.totalVideos} videos
+      <div className="mt-auto w-full pt-2">
+        <div className="relative border border-base-300 rounded-md overflow-hidden text-[9px] font-bold uppercase tracking-widest text-base-content flex items-center justify-between px-2 py-1.5">
+          <div 
+            className="absolute left-0 top-0 bottom-0 bg-primary transition-all duration-700 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+          <span className="relative z-10">{course.totalVideos} videos</span>
+          <span className="relative z-10">{pct}%</span>
+        </div>
       </div>
     </button>
   );
@@ -820,6 +789,8 @@ function CourseDetailOverlay({
     if (file.type === "video" || file.type === "image") {
       setActiveFile(file);
       setFileContent(null);
+      if (file.type === "video")
+        localStorage.setItem(`nest_last_played_${courseId}`, file.path);
       return;
     }
     if (file.type === "text" || file.type === "code") {
@@ -905,11 +876,6 @@ function CourseDetailOverlay({
     ? data.items.filter((i: FileItem) => i.type === "folder").length
     : 0;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const isDark = useIsDark();
-  const gradient =
-    (isDark ? COURSE_GRADIENTS : COURSE_GRADIENTS_LIGHT)[data?.icon] ||
-    (isDark ? COURSE_GRADIENTS.BookOpen : COURSE_GRADIENTS_LIGHT.BookOpen);
-
   return (
     <div className="fixed inset-0 z-[90] bg-base-100 flex flex-col">
       {/* Close Button is inline in sidebar header */}
@@ -919,7 +885,7 @@ function CourseDetailOverlay({
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Left: Course Info Panel */}
           <div
-            className={`w-full md:w-2/5 lg:w-1/3 bg-gradient-to-br ${gradient} flex flex-col md:items-center md:justify-center p-2 md:p-12 relative overflow-hidden border-b md:border-b-0 md:border-r border-base-300/30`}
+            className="w-full md:w-2/5 lg:w-1/3 bg-base-200 flex flex-col md:items-center md:justify-center p-2 md:p-12 relative overflow-hidden border-b md:border-b-0 md:border-r border-base-300/30"
           >
             {/* Decorative background glow */}
             <div className="absolute inset-0 opacity-20 pointer-events-none">
@@ -928,14 +894,14 @@ function CourseDetailOverlay({
             </div>
             <div className="relative z-10 flex flex-col md:items-center md:text-center w-full">
               <div className="flex items-center gap-3 md:flex-col md:gap-0 mb-2 md:mb-6">
-                <div className="p-1.5 md:p-5 rounded-2xl bg-base-100/20 backdrop-blur-sm border border-white/10">
+                <div className="p-1.5 md:p-5 rounded-2xl bg-primary">
                   <CourseIcon
                     iconKey={data.icon}
                     size={24}
-                    className="text-primary drop-shadow-lg md:w-12 md:h-12"
+                    className="text-primary-content drop-shadow-lg md:w-12 md:h-12"
                   />
                 </div>
-                <h1 className="text-base md:text-3xl font-black tracking-tight text-white md:mb-2">
+                <h1 className="text-base md:text-3xl font-black tracking-tight text-base-content md:mb-2">
                   {data.name}
                 </h1>
               </div>
@@ -945,37 +911,37 @@ function CourseDetailOverlay({
                 </p>
               )}
               {/* Stats Row */}
-              <div className="flex items-center gap-4 md:gap-6 mb-2 md:mb-8 text-[9px] md:text-xs font-bold uppercase tracking-widest text-white w-full md:w-auto justify-center">
+              <div className="flex items-center gap-4 md:gap-6 mb-2 md:mb-8 text-[9px] md:text-xs font-bold uppercase tracking-widest text-base-100 w-full md:w-auto justify-center">
                 <div className="flex flex-col items-center gap-0.5 md:gap-1">
-                  <span className="text-sm md:text-lg font-black text-white">
+                  <span className="text-sm md:text-lg font-black text-primary-content">
                     {totalSections}
                   </span>
-                  <span className="text-white/70">Sections</span>
+                  <span className="text-base-100/70">Sections</span>
                 </div>
                 <div className="w-px h-4 md:h-8 bg-current opacity-30" />
                 <div className="flex flex-col items-center gap-0.5 md:gap-1">
-                  <span className="text-sm md:text-lg font-black text-white">
+                  <span className="text-sm md:text-lg font-black text-primary-content">
                     {totalV}
                   </span>
-                  <span className="text-white/70">Videos</span>
+                  <span className="text-base-100/70">Videos</span>
                 </div>
                 <div className="w-px h-4 md:h-8 bg-current opacity-30" />
                 <div className="flex flex-col items-center gap-0.5 md:gap-1">
-                  <span className="text-sm md:text-lg font-black text-white">
+                  <span className="text-sm md:text-lg font-black text-primary-content">
                     {pct}%
                   </span>
-                  <span className="text-white/70">Done</span>
+                  <span className="text-base-100/70">Done</span>
                 </div>
               </div>
               {/* Progress Bar */}
               <div className="w-full md:max-w-xs">
-                <div className="h-1 md:h-2 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-1 md:h-2 rounded-full bg-base-content/20 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-primary transition-all duration-700 ease-out"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="text-[7px] md:text-[10px] font-bold uppercase tracking-widest text-white/70 mt-1 md:mt-2 text-center md:text-center">
+                <div className="text-[7px] md:text-[10px] font-bold uppercase tracking-widest text-base-100/70 mt-1 md:mt-2 text-center md:text-center">
                   {watchedV} of {totalV} videos watched
                 </div>
               </div>
@@ -997,6 +963,27 @@ function CourseDetailOverlay({
                   Course Curriculum
                 </div>
                 <div className="flex items-center gap-3">
+                  {(() => {
+                    const lastPath = localStorage.getItem(`nest_last_played_${courseId}`);
+                    if (!lastPath) return null;
+                    const findFile = (nodes: FileItem[]): FileItem | null => {
+                      for (const n of nodes) {
+                        if (n.path === lastPath && n.type === "video") return n;
+                        if (n.children) { const f = findFile(n.children); if (f) return f; }
+                      }
+                      return null;
+                    };
+                    const lastFile = findFile(items);
+                    if (!lastFile) return null;
+                    return (
+                      <button
+                        onClick={() => openFile(lastFile)}
+                        className="btn btn-xs btn-success bg-success/20 text-success hover:bg-success/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest gap-1"
+                      >
+                        <Play size={10} /> Resume
+                      </button>
+                    );
+                  })()}
                   <button
                     onClick={toggleAll}
                     className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
@@ -1173,11 +1160,32 @@ function CourseDetailOverlay({
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
                     <div className="rounded-xl overflow-hidden bg-black border border-base-300">
                       <video
+                        key={activeFile.path}
                         src={`${API}/api/courses/${courseId}/file?path=${encodeURIComponent(activeFile.path)}`}
                         controls
                         autoPlay
                         playsInline
                         className="w-full aspect-video"
+                        onTimeUpdate={(e) => {
+                          const v = e.currentTarget;
+                          const now = Date.now();
+                          if (!(v as any).__lastSave || now - (v as any).__lastSave > 5000) {
+                            (v as any).__lastSave = now;
+                            localStorage.setItem(
+                              `nest_playback_time_${courseId}`,
+                              JSON.stringify({ path: activeFile.path, time: v.currentTime }),
+                            );
+                          }
+                        }}
+                        onLoadedMetadata={(e) => {
+                          const saved = localStorage.getItem(`nest_playback_time_${courseId}`);
+                          if (saved) {
+                            const { path, time } = JSON.parse(saved);
+                            if (path === activeFile.path && time > 0) {
+                              e.currentTarget.currentTime = time;
+                            }
+                          }
+                        }}
                         onEnded={() => {
                           if (!watched[activeFile.path])
                             toggleWatch(activeFile.path);
@@ -1388,9 +1396,7 @@ function CourseDetailOverlay({
                               })()}
                             </table>
                           </div>
-                        ) : (
-                          <pre
-                            className={`p-6 overflow-auto text-sm leading-relaxed whitespace-pre font-mono flex-1 language-${(() => {
+                        ) : (() => {
                               const ext =
                                 activeFile.name
                                   .split(".")
@@ -1398,18 +1404,37 @@ function CourseDetailOverlay({
                                   ?.toLowerCase() || "clike";
                               const map: Record<string, string> = {
                                 js: "javascript",
+                                jsx: "javascript",
                                 ts: "typescript",
+                                tsx: "typescript",
                                 py: "python",
                                 c: "c",
                                 cpp: "cpp",
                                 h: "c",
+                                html: "markup",
+                                htm: "markup",
+                                xml: "markup",
+                                rs: "rust",
+                                md: "markdown",
+                                sh: "bash",
+                                bash: "bash",
                               };
-                              return map[ext] || ext;
-                            })()}`}
-                          >
-                            <code>{fileContent.content}</code>
-                          </pre>
-                        )}
+                              const lang = map[ext] || ext;
+                              const grammar = Prism.languages[lang] || Prism.languages.clike;
+                              const highlighted = Prism.highlight(
+                                fileContent.content || "",
+                                grammar,
+                                lang,
+                              );
+                              return (
+                                <pre className="p-6 overflow-auto text-sm leading-relaxed whitespace-pre font-mono flex-1">
+                                  <code
+                                    className={`language-${lang}`}
+                                    dangerouslySetInnerHTML={{ __html: highlighted }}
+                                  />
+                                </pre>
+                              );
+                            })()}
                       </div>
                     )}
                   {(activeFile.type === "text" || activeFile.type === "code") &&
@@ -1770,6 +1795,8 @@ function AddCourseModal({
 // ─── Main App ───
 export default function App() {
   const [courses, setCourses] = useState<any[]>([]);
+  const [globalProgress, setGlobalProgress] = useState<Record<string, number>>({});
+  const [loadingCourses, setLoadingCourses] = useState(true);
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [showTunnel, setShowTunnel] = useState(false);
@@ -1788,9 +1815,14 @@ export default function App() {
 
   const fetchCourses = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/api/courses`);
-      setCourses(await r.json());
+      const [rCourses, rProgress] = await Promise.all([
+        fetch(`${API}/api/courses`),
+        fetch(`${API}/api/courses/progress`)
+      ]);
+      setCourses(await rCourses.json());
+      setGlobalProgress(await rProgress.json());
     } catch {}
+    setLoadingCourses(false);
   }, []);
 
   // ─── Browser back/forward: sync URL ↔ state ───
@@ -1889,7 +1921,11 @@ export default function App() {
 
       {/* Course Grid */}
       <div className="p-4 max-w-4xl mx-auto">
-        {courses.length === 0 ? (
+        {loadingCourses ? (
+          <div className="flex justify-center py-32 text-primary">
+            <Loader size={32} className="animate-spin" />
+          </div>
+        ) : courses.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 text-center">
             <div className="text-4xl mb-4">🪺</div>
             <div className="text-sm font-bold mb-2">No courses yet</div>
@@ -1909,6 +1945,7 @@ export default function App() {
               <CourseCard
                 key={c.id}
                 course={c}
+                watchedCount={globalProgress[c.id] || 0}
                 onClick={() => openCourse(c.id)}
                 onDelete={() => deleteCourse(c.id)}
               />

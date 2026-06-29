@@ -7,6 +7,7 @@ export interface Course {
   localPath: string;
   icon: string;
   createdAt: string;
+  totalVideos?: number;
 }
 
 export type FileType = 'video' | 'text' | 'code' | 'document' | 'link' | 'image' | 'other';

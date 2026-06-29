@@ -132,30 +132,67 @@ const countVideoFiles = async (dirPath: string): Promise<number> => {
   const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'];
   try {
     const entries = await readdir(dirPath, { withFileTypes: true });
+    const promises: Promise<number>[] = [];
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue;
-      if (entry.isDirectory()) count += await countVideoFiles(path.join(dirPath, entry.name));
+      if (entry.isDirectory()) promises.push(countVideoFiles(path.join(dirPath, entry.name)));
       else if (videoExts.includes(path.extname(entry.name).toLowerCase())) count++;
     }
+    const results = await Promise.all(promises);
+    count += results.reduce((a, b) => a + b, 0);
   } catch {}
   return count;
 };
 
 // ─── Video count cache (30s TTL, max 200 entries) ───
-const videoCountCache = new Map<string, { count: number; ts: number }>();
+const videoCountCache = new Map<string, { count: number; ts: number; updating?: boolean }>();
 const CACHE_TTL = 30_000;
 const CACHE_MAX = 200;
 
-const getCachedVideoCount = async (dirPath: string): Promise<number> => {
-  const cached = videoCountCache.get(dirPath);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.count;
-  const count = await countVideoFiles(dirPath);
-  if (videoCountCache.size >= CACHE_MAX) {
-    const oldest = videoCountCache.keys().next().value;
-    if (oldest) videoCountCache.delete(oldest);
+const triggerVideoCountUpdate = async (course: Course) => {
+  const dirPath = course.localPath;
+  let cached = videoCountCache.get(dirPath);
+  if (!cached) {
+    cached = { count: course.totalVideos || 0, ts: 0, updating: true };
+    if (videoCountCache.size >= CACHE_MAX) {
+      const oldest = videoCountCache.keys().next().value;
+      if (oldest) videoCountCache.delete(oldest);
+    }
+    videoCountCache.set(dirPath, cached);
+  } else {
+    cached.updating = true;
   }
-  videoCountCache.set(dirPath, { count, ts: Date.now() });
-  return count;
+  
+  try {
+    const count = await countVideoFiles(dirPath);
+    videoCountCache.set(dirPath, { count, ts: Date.now(), updating: false });
+    
+    if (course.totalVideos !== count) {
+      const allCourses = await getCourses();
+      const target = allCourses.find((c) => c.id === course.id);
+      if (target && target.totalVideos !== count) {
+        target.totalVideos = count;
+        await saveCourses(allCourses);
+      }
+    }
+  } catch (err) {
+    if (cached) cached.updating = false;
+  }
+};
+
+const getCachedVideoCount = (course: Course): number => {
+  const dirPath = course.localPath;
+  const cached = videoCountCache.get(dirPath);
+  
+  if (cached) {
+    if (Date.now() - cached.ts > CACHE_TTL && !cached.updating) {
+      triggerVideoCountUpdate(course).catch(() => {});
+    }
+    return cached.count;
+  }
+  
+  triggerVideoCountUpdate(course).catch(() => {});
+  return course.totalVideos || 0;
 };
 
 const invalidateVideoCount = (dirPath: string) => {
@@ -286,10 +323,10 @@ app.post('/api/tunnel/stop', (_req, res) => {
 app.get('/api/courses', async (_req, res) => {
   try {
     const courses = await getCourses();
-    const enriched: CourseWithVideos[] = await Promise.all(courses.map(async (c) => ({
+    const enriched: CourseWithVideos[] = courses.map((c) => ({
       ...c,
-      totalVideos: await getCachedVideoCount(c.localPath),
-    })));
+      totalVideos: getCachedVideoCount(c),
+    }));
     res.json(enriched);
   } catch {
     res.status(500).json({ error: 'Failed to load courses' });
@@ -338,6 +375,17 @@ app.delete('/api/courses/:id', async (req, res) => {
   invalidateVideoCount(target.localPath);
   await saveCourses(courses.filter((c) => c.id !== req.params.id));
   res.json({ success: true });
+});
+
+// ─── Course Progress (local, no auth) ───
+
+app.get('/api/courses/progress', async (_req, res) => {
+  const all = await getCourseProgressData();
+  const result: Record<string, number> = {};
+  for (const [courseId, files] of Object.entries(all)) {
+    result[courseId] = Object.keys(files).length;
+  }
+  res.json(result);
 });
 
 app.get('/api/courses/:id/browse', async (req, res) => {
@@ -460,7 +508,7 @@ app.get('/api/courses/:id/file', async (req, res) => {
   }
 });
 
-// ─── Course Progress (local, no auth) ───
+
 
 app.get('/api/courses/:id/progress', async (_req, res) => {
   const courseId = _req.params.id;
