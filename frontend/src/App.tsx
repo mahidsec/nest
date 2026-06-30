@@ -641,35 +641,33 @@ function CourseDetailOverlay({
             {topHalf}
             {bottomHalf}
             {/* Dot marker at center of item on the line */}
-            {level > 0 && (
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                left: `calc(${currentLeft} + 1px)`,
+                top: "50%",
+                transform: "translate(-50%, -50%)",
+                width: "12px",
+                height: "12px",
+                zIndex: 1,
+              }}
+            >
               <div
-                className="absolute pointer-events-none"
-                style={{
-                  left: `calc(${currentLeft} + 1px)`,
-                  top: "50%",
-                  transform: "translate(-50%, -50%)",
-                  width: "12px",
-                  height: "12px",
-                  zIndex: 1,
-                }}
+                className={`w-3 h-3 rounded-full flex items-center justify-center transition-colors ${
+                  isWatched
+                    ? "bg-primary group-hover:bg-primary"
+                    : "bg-base-100 group-hover:bg-base-200"
+                }`}
               >
                 <div
-                  className={`w-3 h-3 rounded-full flex items-center justify-center transition-colors ${
+                  className={`w-1.5 h-1.5 rounded-full transition-colors ${
                     isWatched
-                      ? "bg-primary group-hover:bg-primary"
-                      : "bg-base-100 group-hover:bg-base-200"
+                      ? "bg-base-100 group-hover:bg-base-200"
+                      : "bg-base-300"
                   }`}
-                >
-                  <div
-                    className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                      isWatched
-                        ? "bg-base-100 group-hover:bg-base-200"
-                        : "bg-base-300"
-                    }`}
-                  />
-                </div>
+                />
               </div>
-            )}
+            </div>
           </div>
         );
       };
@@ -1877,7 +1875,7 @@ export default function App() {
             <span className="text-lg">🪺</span>
             <h1 className="text-sm font-bold">Nest</h1>
             <span className="text-[9px] font-bold uppercase tracking-widest opacity-30">
-              v1.0.0
+              v{import.meta.env.VITE_APP_VERSION || '1.0.0'}
             </span>
           </div>
           <div className="flex items-center gap-2">
