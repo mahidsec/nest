@@ -914,21 +914,21 @@ function CourseDetailOverlay({
                   <span className="text-sm md:text-lg font-black text-primary-content">
                     {totalSections}
                   </span>
-                  <span className="text-base-100/70">Sections</span>
+                  <span className="text-primary/70">Sections</span>
                 </div>
                 <div className="w-px h-4 md:h-8 bg-current opacity-30" />
                 <div className="flex flex-col items-center gap-0.5 md:gap-1">
                   <span className="text-sm md:text-lg font-black text-primary-content">
                     {totalV}
                   </span>
-                  <span className="text-base-100/70">Videos</span>
+                  <span className="text-primary/70">Videos</span>
                 </div>
                 <div className="w-px h-4 md:h-8 bg-current opacity-30" />
                 <div className="flex flex-col items-center gap-0.5 md:gap-1">
                   <span className="text-sm md:text-lg font-black text-primary-content">
                     {pct}%
                   </span>
-                  <span className="text-base-100/70">Done</span>
+                  <span className="text-primary/70">Done</span>
                 </div>
               </div>
               {/* Progress Bar */}
