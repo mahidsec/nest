@@ -526,7 +526,7 @@ function CopyableCodeBlock({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative group">
-      <pre className="overflow-x-auto border border-base-300/50 rounded-lg p-3 text-[10px] my-1" style={{ backgroundColor: '#282c34', color: '#abb2bf' }}>
+      <pre className="overflow-x-auto border border-base-300/50 rounded-lg p-3 text-[10px] my-1 [&_.hljs]:!text-[#f0f0f0]" style={{ backgroundColor: '#282c34' }}>
         {children}
       </pre>
       <button
@@ -589,7 +589,7 @@ function MarkdownRenderer({
             }
             // Inline code
             return (
-              <code className="px-1.5 py-0.5 rounded text-[10px] break-words" style={{ backgroundColor: '#282c34', color: '#abb2bf' }}>
+              <code className="px-1.5 py-0.5 rounded text-[10px] break-words" style={{ backgroundColor: '#282c34', color: '#f0f0f0' }}>
                 {children}
               </code>
             );
