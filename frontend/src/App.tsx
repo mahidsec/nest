@@ -1906,7 +1906,14 @@ function AddCourseModal({
             <input
               type="text"
               value={localPath}
-              onChange={(e) => setLocalPath(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setLocalPath(v);
+                if (!name.trim() && v.trim()) {
+                  const folder = v.trim().replace(/\/+$/, "").split("/").pop() || "";
+                  if (folder) setName(folder);
+                }
+              }}
               placeholder="/home/user/courses/react"
               className="input input-bordered input-sm w-full bg-base-100 text-xs font-mono"
             />
