@@ -555,7 +555,7 @@ function MarkdownRenderer({
     : [rehypeHighlight, rehypeKatex];
 
   return (
-    <div className="overflow-x-auto max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1 [&_.katex]:text-[0.85em]">
+    <div className="overflow-x-auto max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:my-6 [&_.katex-display]:py-4 [&_.katex]:text-[0.85em]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={rehypePlugins}
@@ -564,13 +564,13 @@ function MarkdownRenderer({
             return <p className="mb-2 last:mb-0 text-[11px] leading-relaxed">{children}</p>;
           },
           h1({ children }) {
-            return <h1 className="text-base font-bold mt-3 mb-1.5 text-base-content">{children}</h1>;
+            return <h1 className="text-base font-bold mt-4 mb-3 text-base-content">{children}</h1>;
           },
           h2({ children }) {
-            return <h2 className="text-sm font-bold mt-3 mb-1.5 text-base-content border-b border-base-300 pb-0.5">{children}</h2>;
+            return <h2 className="text-sm font-bold mt-4 mb-3 text-base-content border-b border-base-300 pb-0.5">{children}</h2>;
           },
           h3({ children }) {
-            return <h3 className="text-xs font-bold mt-2 mb-1 text-base-content">{children}</h3>;
+            return <h3 className="text-xs font-bold mt-3 mb-2 text-base-content">{children}</h3>;
           },
           code({ className, children }) {
             const match = /language-(\w+)/.exec(className || "");

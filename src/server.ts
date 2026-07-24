@@ -1,20 +1,26 @@
-import express from 'express';
-import cors from 'cors';
-import { createServer } from 'http';
-import fs from 'fs';
-import { readFile, writeFile, readdir, stat, rename } from 'fs/promises';
-import path from 'path';
-import crypto from 'crypto';
-import { spawn, execSync } from 'child_process';
-import { homedir, platform, arch } from 'os';
-import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from './config.js';
-import type { Course, CourseWithVideos, FileType, FileItem, DirectoryScanResult } from './types.js';
+import express from "express";
+import cors from "cors";
+import { createServer } from "http";
+import fs from "fs";
+import { readFile, writeFile, readdir, stat, rename } from "fs/promises";
+import path from "path";
+import crypto from "crypto";
+import { spawn, execSync } from "child_process";
+import { homedir, platform, arch } from "os";
+import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from "./config.js";
+import type {
+  Course,
+  CourseWithVideos,
+  FileType,
+  FileItem,
+  DirectoryScanResult,
+} from "./types.js";
 
 const app = express();
 const httpServer = createServer(app);
 
 const PORT = Number(process.env.PORT) || 6969;
-const IS_TUNNEL = process.env.NEST_TUNNEL === 'true';
+const IS_TUNNEL = process.env.NEST_TUNNEL === "true";
 
 // ─── CORS: localhost only + tunnel support ───
 app.use(cors());
@@ -23,89 +29,158 @@ app.use(express.json());
 
 // ─── Security headers ───
 app.use((_req, res, next) => {
-  res.setHeader('Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self';");
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self';",
+  );
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
+  );
   next();
 });
 
 // ─── Serve static frontend ───
-const publicDir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'frontend', 'dist');
+const publicDir = path.join(
+  path.dirname(new URL(import.meta.url).pathname),
+  "..",
+  "frontend",
+  "dist",
+);
 if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir, { maxAge: '1h' }));
+  app.use(express.static(publicDir, { maxAge: "1h" }));
 }
 
 // ─── Helpers ───
 
 const VALID_ICONS = [
-  'Zap', 'Music', 'Languages', 'BookOpen', 'DollarSign', 'Code', 'Paintbrush', 'Microscope',
-  'BarChart3', 'Dumbbell', 'Camera', 'Gamepad2', 'Brain', 'Scale', 'HeartPulse', 'Wrench',
-  'GraduationCap', 'Briefcase',
+  "Zap",
+  "Music",
+  "Languages",
+  "BookOpen",
+  "DollarSign",
+  "Code",
+  "Paintbrush",
+  "Microscope",
+  "BarChart3",
+  "Dumbbell",
+  "Camera",
+  "Gamepad2",
+  "Brain",
+  "Scale",
+  "HeartPulse",
+  "Wrench",
+  "GraduationCap",
+  "Briefcase",
 ];
 
 const getCourses = async (): Promise<Course[]> => {
   try {
-    const data = await readFile(COURSES_PATH, 'utf-8');
+    const data = await readFile(COURSES_PATH, "utf-8");
     const courses: Course[] = JSON.parse(data);
-    
+
     // Migration: add sortOrder if missing
     let migrated = false;
     courses.forEach((c, i) => {
-      if (typeof c.sortOrder !== 'number') {
+      if (typeof c.sortOrder !== "number") {
         c.sortOrder = i;
         migrated = true;
       }
     });
-    
+
     if (migrated) {
       await saveCourses(courses).catch(() => {});
     }
-    
+
     return courses;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 };
 
 const saveCourses = async (courses: Course[]): Promise<void> => {
-  const tmp = COURSES_PATH + '.tmp';
+  const tmp = COURSES_PATH + ".tmp";
   await writeFile(tmp, JSON.stringify(courses, null, 2));
   await rename(tmp, COURSES_PATH);
 };
 
 const naturalCompare = (a: string, b: string): number =>
-  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-const HIDDEN_EXTS = ['.srt', '.sub', '.ass', '.ssa', '.idx', '.vtt'];
+const HIDDEN_EXTS = [".srt", ".sub", ".ass", ".ssa", ".idx", ".vtt"];
 
 const isHiddenMediaSub = (filename: string): boolean =>
   HIDDEN_EXTS.includes(path.extname(filename).toLowerCase());
 
 const getFileType = (filename: string): FileType => {
   const ext = path.extname(filename).toLowerCase();
-  const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'];
-  const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-  const codeExts = ['.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.html', '.css', '.scss', '.json', '.xml', '.yaml', '.yml', '.sh', '.bash', '.sql', '.r', '.jsx', '.tsx', '.vue', '.svelte'];
-  const docExts = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt'];
-  const textExts = ['.txt', '.md', '.rtf', '.log', '.csv'];
-  const linkExts = ['.url', '.webloc', '.desktop', '.lnk'];
-  if (videoExts.includes(ext)) return 'video';
-  if (imageExts.includes(ext)) return 'image';
-  if (codeExts.includes(ext)) return 'code';
-  if (docExts.includes(ext)) return 'document';
-  if (textExts.includes(ext)) return 'text';
-  if (linkExts.includes(ext)) return 'link';
-  return 'other';
+  const videoExts = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"];
+  const imageExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"];
+  const codeExts = [
+    ".js",
+    ".ts",
+    ".py",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".cs",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".kt",
+    ".html",
+    ".css",
+    ".scss",
+    ".json",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".sh",
+    ".bash",
+    ".sql",
+    ".r",
+    ".jsx",
+    ".tsx",
+    ".vue",
+    ".svelte",
+  ];
+  const docExts = [
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".odt",
+  ];
+  const textExts = [".txt", ".md", ".rtf", ".log", ".csv"];
+  const linkExts = [".url", ".webloc", ".desktop", ".lnk"];
+  if (videoExts.includes(ext)) return "video";
+  if (imageExts.includes(ext)) return "image";
+  if (codeExts.includes(ext)) return "code";
+  if (docExts.includes(ext)) return "document";
+  if (textExts.includes(ext)) return "text";
+  if (linkExts.includes(ext)) return "link";
+  return "other";
 };
 
-const scanDirectory = async (dirPath: string, relativeTo: string): Promise<DirectoryScanResult> => {
+const scanDirectory = async (
+  dirPath: string,
+  relativeTo: string,
+): Promise<DirectoryScanResult> => {
   const entries = await readdir(dirPath, { withFileTypes: true });
   const folders: FileItem[] = [];
   const files: FileItem[] = [];
 
   for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue;
+    if (entry.name.startsWith(".")) continue;
     const fullPath = path.join(dirPath, entry.name);
     const relPath = path.relative(relativeTo, fullPath);
 
@@ -113,7 +188,7 @@ const scanDirectory = async (dirPath: string, relativeTo: string): Promise<Direc
       const children = await scanDirectory(fullPath, relativeTo);
       folders.push({
         name: entry.name,
-        type: 'folder',
+        type: "folder",
         path: relPath,
         children: children.items,
         totalVideos: children.totalVideos,
@@ -135,23 +210,30 @@ const scanDirectory = async (dirPath: string, relativeTo: string): Promise<Direc
   files.sort((a, b) => naturalCompare(a.name, b.name));
 
   const items = [...folders, ...files];
-  const totalVideos = files.filter(f => f.type === 'video').length
-    + folders.reduce((sum, f) => sum + (f.totalVideos || 0), 0);
+  const totalVideos =
+    files.filter((f) => f.type === "video").length +
+    folders.reduce((sum, f) => sum + (f.totalVideos || 0), 0);
 
   return { items, totalVideos };
 };
 
 const countVideoFiles = async (dirPath: string): Promise<number> => {
-  try { await stat(dirPath); } catch { return 0; }
+  try {
+    await stat(dirPath);
+  } catch {
+    return 0;
+  }
   let count = 0;
-  const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v'];
+  const videoExts = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"];
   try {
     const entries = await readdir(dirPath, { withFileTypes: true });
     const promises: Promise<number>[] = [];
     for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      if (entry.isDirectory()) promises.push(countVideoFiles(path.join(dirPath, entry.name)));
-      else if (videoExts.includes(path.extname(entry.name).toLowerCase())) count++;
+      if (entry.name.startsWith(".")) continue;
+      if (entry.isDirectory())
+        promises.push(countVideoFiles(path.join(dirPath, entry.name)));
+      else if (videoExts.includes(path.extname(entry.name).toLowerCase()))
+        count++;
     }
     const results = await Promise.all(promises);
     count += results.reduce((a, b) => a + b, 0);
@@ -160,7 +242,10 @@ const countVideoFiles = async (dirPath: string): Promise<number> => {
 };
 
 // ─── Video count cache (30s TTL, max 200 entries) ───
-const videoCountCache = new Map<string, { count: number; ts: number; updating?: boolean }>();
+const videoCountCache = new Map<
+  string,
+  { count: number; ts: number; updating?: boolean }
+>();
 const CACHE_TTL = 30_000;
 const CACHE_MAX = 200;
 
@@ -177,11 +262,11 @@ const triggerVideoCountUpdate = async (course: Course) => {
   } else {
     cached.updating = true;
   }
-  
+
   try {
     const count = await countVideoFiles(dirPath);
     videoCountCache.set(dirPath, { count, ts: Date.now(), updating: false });
-    
+
     if (course.totalVideos !== count) {
       const allCourses = await getCourses();
       const target = allCourses.find((c) => c.id === course.id);
@@ -198,14 +283,14 @@ const triggerVideoCountUpdate = async (course: Course) => {
 const getCachedVideoCount = (course: Course): number => {
   const dirPath = course.localPath;
   const cached = videoCountCache.get(dirPath);
-  
+
   if (cached) {
     if (Date.now() - cached.ts > CACHE_TTL && !cached.updating) {
       triggerVideoCountUpdate(course).catch(() => {});
     }
     return cached.count;
   }
-  
+
   triggerVideoCountUpdate(course).catch(() => {});
   return course.totalVideos || 0;
 };
@@ -214,15 +299,21 @@ const invalidateVideoCount = (dirPath: string) => {
   videoCountCache.delete(dirPath);
 };
 
-const getCourseProgressData = async (): Promise<Record<string, Record<string, boolean>>> => {
+const getCourseProgressData = async (): Promise<
+  Record<string, Record<string, boolean>>
+> => {
   try {
-    const data = await readFile(COURSE_PROGRESS_PATH, 'utf-8');
+    const data = await readFile(COURSE_PROGRESS_PATH, "utf-8");
     return JSON.parse(data);
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 };
 
-const saveCourseProgressData = async (data: Record<string, Record<string, boolean>>): Promise<void> => {
-  const tmp = COURSE_PROGRESS_PATH + '.tmp';
+const saveCourseProgressData = async (
+  data: Record<string, Record<string, boolean>>,
+): Promise<void> => {
+  const tmp = COURSE_PROGRESS_PATH + ".tmp";
   await writeFile(tmp, JSON.stringify(data));
   await rename(tmp, COURSE_PROGRESS_PATH);
 };
@@ -232,28 +323,36 @@ const saveCourseProgressData = async (data: Record<string, Record<string, boolea
 let tunnelChild: ReturnType<typeof spawn> | null = null;
 let tunnelPublicUrl: string | null = null;
 
-const NEST_BIN_DIR = path.join(homedir(), '.nest', 'bin');
-const CLOUDFLARED_PATH = path.join(NEST_BIN_DIR, 'cloudflared');
+const NEST_BIN_DIR = path.join(homedir(), ".nest", "bin");
+const CLOUDFLARED_PATH = path.join(NEST_BIN_DIR, "cloudflared");
 
 function getCloudflaredDownloadUrl(): string {
   const p = platform();
   const a = arch();
-  const osMap: Record<string, string> = { linux: 'linux', darwin: 'darwin' };
-  const archMap: Record<string, string> = { x64: 'amd64', arm64: 'arm64' };
+  const osMap: Record<string, string> = { linux: "linux", darwin: "darwin" };
+  const archMap: Record<string, string> = { x64: "amd64", arm64: "arm64" };
   return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${osMap[p] || p}-${archMap[a] || a}`;
 }
 
 function findCloudflared(): string | null {
   // 1. Check system PATH
   try {
-    const result = execSync('which cloudflared 2>/dev/null || command -v cloudflared 2>/dev/null').toString().trim();
+    const result = execSync(
+      "which cloudflared 2>/dev/null || command -v cloudflared 2>/dev/null",
+    )
+      .toString()
+      .trim();
     if (result && fs.existsSync(result)) return result;
   } catch {}
   // 2. Check ~/.nest/bin/cloudflared
   if (fs.existsSync(CLOUDFLARED_PATH)) return CLOUDFLARED_PATH;
   try {
-    if (!fs.existsSync(NEST_BIN_DIR)) fs.mkdirSync(NEST_BIN_DIR, { recursive: true });
-    execSync(`curl -fSL -o "${CLOUDFLARED_PATH}" "${getCloudflaredDownloadUrl()}"`, { stdio: 'inherit' });
+    if (!fs.existsSync(NEST_BIN_DIR))
+      fs.mkdirSync(NEST_BIN_DIR, { recursive: true });
+    execSync(
+      `curl -fSL -o "${CLOUDFLARED_PATH}" "${getCloudflaredDownloadUrl()}"`,
+      { stdio: "inherit" },
+    );
     fs.chmodSync(CLOUDFLARED_PATH, 0o755);
     return CLOUDFLARED_PATH;
   } catch {
@@ -261,22 +360,28 @@ function findCloudflared(): string | null {
   }
 }
 
-app.get('/api/tunnel', (_req, res) => {
-  res.json({ active: !!tunnelChild && !!tunnelPublicUrl, url: tunnelPublicUrl });
+app.get("/api/tunnel", (_req, res) => {
+  res.json({
+    active: !!tunnelChild && !!tunnelPublicUrl,
+    url: tunnelPublicUrl,
+  });
 });
 
-app.post('/api/tunnel/start', async (_req, res) => {
+app.post("/api/tunnel/start", async (_req, res) => {
   if (tunnelChild) {
     return res.json({ success: true, url: tunnelPublicUrl });
   }
 
   const bin = findCloudflared();
   if (!bin) {
-    return res.status(400).json({ error: 'cloudflared not found. Run `cloudflared tunnel --url http://localhost:${PORT}` manually or install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-local-tunnel/' });
+    return res.status(400).json({
+      error:
+        "cloudflared not found. Run `cloudflared tunnel --url http://localhost:${PORT}` manually or install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-local-tunnel/",
+    });
   }
 
-  tunnelChild = spawn(bin, ['tunnel', '--url', `http://localhost:${PORT}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  tunnelChild = spawn(bin, ["tunnel", "--url", `http://localhost:${PORT}`], {
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   let resolved = false;
@@ -290,20 +395,20 @@ app.post('/api/tunnel/start', async (_req, res) => {
     }
   };
 
-  tunnelChild.stdout?.on('data', (data) => {
+  tunnelChild.stdout?.on("data", (data) => {
     extractUrl(data.toString());
   });
 
-  tunnelChild.stderr?.on('data', (data) => {
+  tunnelChild.stderr?.on("data", (data) => {
     extractUrl(data.toString());
   });
 
-  tunnelChild.on('close', () => {
+  tunnelChild.on("close", () => {
     tunnelChild = null;
     tunnelPublicUrl = null;
   });
 
-  tunnelChild.on('error', () => {
+  tunnelChild.on("error", () => {
     tunnelChild = null;
     tunnelPublicUrl = null;
   });
@@ -311,22 +416,31 @@ app.post('/api/tunnel/start', async (_req, res) => {
   // Wait up to 15s for URL
   const tunnelUrl = await new Promise<string | null>((resolve) => {
     if (tunnelPublicUrl) return resolve(tunnelPublicUrl);
-    const timer = setTimeout(() => { clearInterval(interval); resolve(null); }, 15000);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      resolve(null);
+    }, 15000);
     const interval = setInterval(() => {
-      if (tunnelPublicUrl) { clearTimeout(timer); clearInterval(interval); resolve(tunnelPublicUrl); }
+      if (tunnelPublicUrl) {
+        clearTimeout(timer);
+        clearInterval(interval);
+        resolve(tunnelPublicUrl);
+      }
     }, 200);
   });
 
   if (tunnelUrl) {
     res.json({ success: true, url: tunnelUrl });
   } else {
-    res.status(500).json({ error: 'Tunnel failed to start (timeout)' });
+    res.status(500).json({ error: "Tunnel failed to start (timeout)" });
   }
 });
 
-app.post('/api/tunnel/stop', (_req, res) => {
+app.post("/api/tunnel/stop", (_req, res) => {
   if (tunnelChild) {
-    try { tunnelChild.kill('SIGTERM'); } catch {}
+    try {
+      tunnelChild.kill("SIGTERM");
+    } catch {}
     tunnelChild = null;
     tunnelPublicUrl = null;
   }
@@ -335,7 +449,7 @@ app.post('/api/tunnel/stop', (_req, res) => {
 
 // ─── Course Routes (no auth — local only) ───
 
-app.get('/api/courses', async (_req, res) => {
+app.get("/api/courses", async (_req, res) => {
   try {
     const courses = await getCourses();
     courses.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
@@ -345,37 +459,44 @@ app.get('/api/courses', async (_req, res) => {
     }));
     res.json(enriched);
   } catch {
-    res.status(500).json({ error: 'Failed to load courses' });
+    res.status(500).json({ error: "Failed to load courses" });
   }
 });
 
-app.post('/api/courses', async (req, res) => {
+app.post("/api/courses", async (req, res) => {
   const { name, localPath, icon, subtitle } = req.body;
-  if (!name || !localPath) return res.status(400).json({ error: 'Name and localPath are required' });
+  if (!name || !localPath)
+    return res.status(400).json({ error: "Name and localPath are required" });
 
   // Validate icon
   if (icon && !VALID_ICONS.includes(icon)) {
-    return res.status(400).json({ error: `Invalid icon. Valid icons: ${VALID_ICONS.join(', ')}` });
+    return res
+      .status(400)
+      .json({ error: `Invalid icon. Valid icons: ${VALID_ICONS.join(", ")}` });
   }
 
   // Validate subtitle length
   if (subtitle && subtitle.length > 200) {
-    return res.status(400).json({ error: 'Subtitle must be 200 characters or less' });
+    return res
+      .status(400)
+      .json({ error: "Subtitle must be 200 characters or less" });
   }
 
   const resolved = path.resolve(localPath);
   const s = await stat(resolved).catch(() => null);
   if (!s || !s.isDirectory()) {
-    return res.status(400).json({ error: 'Path does not exist or is not a directory' });
+    return res
+      .status(400)
+      .json({ error: "Path does not exist or is not a directory" });
   }
 
   const courses = await getCourses();
   const course = {
     id: crypto.randomUUID(),
     name,
-    subtitle: subtitle || '',
+    subtitle: subtitle || "",
     localPath: resolved,
-    icon: icon || 'BookOpen',
+    icon: icon || "BookOpen",
     createdAt: new Date().toISOString(),
   };
   courses.push(course);
@@ -384,27 +505,31 @@ app.post('/api/courses', async (req, res) => {
   res.json({ success: true, course });
 });
 
-app.delete('/api/courses/:id', async (req, res) => {
+app.delete("/api/courses/:id", async (req, res) => {
   const courses = await getCourses();
   const target = courses.find((c) => c.id === req.params.id);
-  if (!target) return res.status(404).json({ error: 'Course not found' });
+  if (!target) return res.status(404).json({ error: "Course not found" });
   invalidateVideoCount(target.localPath);
   await saveCourses(courses.filter((c) => c.id !== req.params.id));
   res.json({ success: true });
 });
 
-app.put('/api/courses/reorder', async (req, res) => {
+app.put("/api/courses/reorder", async (req, res) => {
   const { orderedIds } = req.body;
-  if (!Array.isArray(orderedIds)) return res.status(400).json({ error: 'orderedIds array required' });
+  if (!Array.isArray(orderedIds))
+    return res.status(400).json({ error: "orderedIds array required" });
 
   const courses = await getCourses();
-  const validIds = new Set(courses.map(c => c.id));
-  if (!orderedIds.every(id => validIds.has(id)) || orderedIds.length !== courses.length) {
-    return res.status(400).json({ error: 'Invalid orderedIds' });
+  const validIds = new Set(courses.map((c) => c.id));
+  if (
+    !orderedIds.every((id) => validIds.has(id)) ||
+    orderedIds.length !== courses.length
+  ) {
+    return res.status(400).json({ error: "Invalid orderedIds" });
   }
 
   const idToIndex = new Map(orderedIds.map((id, index) => [id, index]));
-  courses.forEach(c => {
+  courses.forEach((c) => {
     c.sortOrder = idToIndex.get(c.id) ?? 0;
   });
 
@@ -414,7 +539,7 @@ app.put('/api/courses/reorder', async (req, res) => {
 
 // ─── Course Progress (local, no auth) ───
 
-app.get('/api/courses/progress', async (_req, res) => {
+app.get("/api/courses/progress", async (_req, res) => {
   const all = await getCourseProgressData();
   const result: Record<string, number> = {};
   for (const [courseId, files] of Object.entries(all)) {
@@ -423,15 +548,17 @@ app.get('/api/courses/progress', async (_req, res) => {
   res.json(result);
 });
 
-app.get('/api/courses/:id/browse', async (req, res) => {
+app.get("/api/courses/:id/browse", async (req, res) => {
   const courses = await getCourses();
   const course = courses.find((c) => c.id === req.params.id);
-  if (!course) return res.status(404).json({ error: 'Course not found' });
+  if (!course) return res.status(404).json({ error: "Course not found" });
 
   try {
     await stat(course.localPath);
   } catch {
-    return res.status(404).json({ error: 'Course directory not found on disk' });
+    return res
+      .status(404)
+      .json({ error: "Course directory not found on disk" });
   }
 
   try {
@@ -439,122 +566,149 @@ app.get('/api/courses/:id/browse', async (req, res) => {
     invalidateVideoCount(course.localPath);
     res.json({ ...course, ...result });
   } catch {
-    res.status(500).json({ error: 'Failed to scan directory' });
+    res.status(500).json({ error: "Failed to scan directory" });
   }
 });
 
-app.get('/api/courses/:id/file', async (req, res) => {
+app.get("/api/courses/:id/file", async (req, res) => {
   try {
-  const courses = await getCourses();
-  const course = courses.find((c) => c.id === req.params.id);
-  if (!course) return res.status(404).json({ error: 'Course not found' });
+    const courses = await getCourses();
+    const course = courses.find((c) => c.id === req.params.id);
+    if (!course) return res.status(404).json({ error: "Course not found" });
 
-  const filePath = req.query.path as string;
-  if (!filePath) return res.status(400).json({ error: 'File path required' });
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ error: "File path required" });
 
-  const resolved = path.resolve(course.localPath, filePath);
-  // Canonicalize both paths to prevent symlink escapes
-  const courseRoot = await fs.promises.realpath(path.resolve(course.localPath));
-  let realResolved: string;
-  try {
-    realResolved = await fs.promises.realpath(resolved);
-  } catch {
-    // File doesn't exist yet or broken symlink — fall back to resolved path
-    // but still validate the resolved path is under courseRoot
-    realResolved = resolved;
-  }
-  if (!realResolved.startsWith(courseRoot + path.sep) && realResolved !== courseRoot) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  const fileStat = await stat(realResolved).catch(() => null);
-  if (!fileStat) return res.status(404).json({ error: 'File not found' });
-
-  const ext = path.extname(realResolved).toLowerCase();
-  const fileType = getFileType(path.basename(realResolved));
-
-  if (fileType === 'text' || fileType === 'code') {
-    const content = await readFile(realResolved, 'utf-8');
-    return res.json({ type: fileType, content, name: path.basename(realResolved) });
-  }
-
-  if (fileType === 'link') {
+    const resolved = path.resolve(course.localPath, filePath);
+    // Canonicalize both paths to prevent symlink escapes
+    const courseRoot = await fs.promises.realpath(
+      path.resolve(course.localPath),
+    );
+    let realResolved: string;
     try {
-      const content = await readFile(realResolved, 'utf-8');
-      const urlMatch = content.match(/URL=(.+)/i) || content.match(/https?:\/\/[^\s]+/);
-      return res.json({ type: 'link', url: urlMatch ? urlMatch[1] || urlMatch[0] : content.trim(), name: path.basename(realResolved) });
+      realResolved = await fs.promises.realpath(resolved);
     } catch {
-      return res.status(500).json({ error: 'Failed to read link file' });
+      // File doesn't exist yet or broken symlink — fall back to resolved path
+      // but still validate the resolved path is under courseRoot
+      realResolved = resolved;
     }
-  }
-
-  const mimeMap: Record<string, string> = {
-    '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
-    '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4',
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-    '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
-    '.pdf': 'application/pdf',
-    '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  };
-  const contentType = mimeMap[ext] || 'application/octet-stream';
-
-  const safePipe = (stream: fs.ReadStream, response: typeof res) => {
-    stream.on('error', () => { stream.destroy(); });
-    req.on('close', () => { stream.destroy(); });
-    stream.pipe(response);
-  };
-
-  if (fileType === 'video') {
-    const range = req.headers.range;
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      let start = parseInt(parts[0] || '0', 10);
-      let end = parts[1] ? parseInt(parts[1], 10) : fileStat.size - 1;
-      // Validate and clamp range bounds
-      if (isNaN(start) || start < 0) start = 0;
-      if (isNaN(end) || end >= fileStat.size) end = fileStat.size - 1;
-      if (start > end) start = end;
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${fileStat.size}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': end - start + 1,
-        'Content-Type': contentType,
-      });
-      safePipe(fs.createReadStream(realResolved, { start, end }), res);
-    } else {
-      res.writeHead(200, {
-        'Content-Length': fileStat.size,
-        'Content-Type': contentType,
-        'Accept-Ranges': 'bytes',
-      });
-      safePipe(fs.createReadStream(realResolved), res);
+    if (
+      !realResolved.startsWith(courseRoot + path.sep) &&
+      realResolved !== courseRoot
+    ) {
+      return res.status(403).json({ error: "Access denied" });
     }
-    return;
-  }
 
-  res.writeHead(200, {
-    'Content-Length': fileStat.size,
-    'Content-Type': contentType,
-    'Cache-Control': 'public, max-age=3600',
-  });
-  safePipe(fs.createReadStream(realResolved), res);
+    const fileStat = await stat(realResolved).catch(() => null);
+    if (!fileStat) return res.status(404).json({ error: "File not found" });
+
+    const ext = path.extname(realResolved).toLowerCase();
+    const fileType = getFileType(path.basename(realResolved));
+
+    if (fileType === "text" || fileType === "code") {
+      const content = await readFile(realResolved, "utf-8");
+      return res.json({
+        type: fileType,
+        content,
+        name: path.basename(realResolved),
+      });
+    }
+
+    if (fileType === "link") {
+      try {
+        const content = await readFile(realResolved, "utf-8");
+        const urlMatch =
+          content.match(/URL=(.+)/i) || content.match(/https?:\/\/[^\s]+/);
+        return res.json({
+          type: "link",
+          url: urlMatch ? urlMatch[1] || urlMatch[0] : content.trim(),
+          name: path.basename(realResolved),
+        });
+      } catch {
+        return res.status(500).json({ error: "Failed to read link file" });
+      }
+    }
+
+    const mimeMap: Record<string, string> = {
+      ".mp4": "video/mp4",
+      ".mkv": "video/x-matroska",
+      ".avi": "video/x-msvideo",
+      ".mov": "video/quicktime",
+      ".webm": "video/webm",
+      ".m4v": "video/mp4",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".bmp": "image/bmp",
+      ".svg": "image/svg+xml",
+      ".pdf": "application/pdf",
+      ".doc": "application/msword",
+      ".docx":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+    const contentType = mimeMap[ext] || "application/octet-stream";
+
+    const safePipe = (stream: fs.ReadStream, response: typeof res) => {
+      stream.on("error", () => {
+        stream.destroy();
+      });
+      req.on("close", () => {
+        stream.destroy();
+      });
+      stream.pipe(response);
+    };
+
+    if (fileType === "video") {
+      const range = req.headers.range;
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        let start = parseInt(parts[0] || "0", 10);
+        let end = parts[1] ? parseInt(parts[1], 10) : fileStat.size - 1;
+        // Validate and clamp range bounds
+        if (isNaN(start) || start < 0) start = 0;
+        if (isNaN(end) || end >= fileStat.size) end = fileStat.size - 1;
+        if (start > end) start = end;
+        res.writeHead(206, {
+          "Content-Range": `bytes ${start}-${end}/${fileStat.size}`,
+          "Accept-Ranges": "bytes",
+          "Content-Length": end - start + 1,
+          "Content-Type": contentType,
+        });
+        safePipe(fs.createReadStream(realResolved, { start, end }), res);
+      } else {
+        res.writeHead(200, {
+          "Content-Length": fileStat.size,
+          "Content-Type": contentType,
+          "Accept-Ranges": "bytes",
+        });
+        safePipe(fs.createReadStream(realResolved), res);
+      }
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Length": fileStat.size,
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=3600",
+    });
+    safePipe(fs.createReadStream(realResolved), res);
   } catch {
-    res.status(500).json({ error: 'Failed to serve file' });
+    res.status(500).json({ error: "Failed to serve file" });
   }
 });
 
-
-
-app.get('/api/courses/:id/progress', async (_req, res) => {
+app.get("/api/courses/:id/progress", async (_req, res) => {
   const courseId = _req.params.id;
   const all = await getCourseProgressData();
   res.json(all[courseId] || {});
 });
 
-app.put('/api/courses/:id/progress', async (req, res) => {
+app.put("/api/courses/:id/progress", async (req, res) => {
   const courseId = req.params.id;
   const { filePath, watched } = req.body;
-  if (!filePath) return res.status(400).json({ error: 'filePath required' });
+  if (!filePath) return res.status(400).json({ error: "filePath required" });
   const all = await getCourseProgressData();
   if (!all[courseId]) all[courseId] = {};
   if (watched) all[courseId][filePath] = true;
@@ -563,30 +717,33 @@ app.put('/api/courses/:id/progress', async (req, res) => {
   res.json(all[courseId]);
 });
 
-
 // ─── AI Chat Proxy (free models, no API key) ───
 
-app.get('/api/ai/models', async (_req, res) => {
+app.get("/api/ai/models", async (_req, res) => {
   try {
-    const resp = await fetch('https://opencode.ai/zen/v1/models');
+    const resp = await fetch("https://opencode.ai/zen/v1/models");
     if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
-    const data = await resp.json() as any;
-    const models = (data?.data || []).filter((m: any) =>
-      m.id?.endsWith('-free') || m.id === 'big-pickle'
+    const data = (await resp.json()) as any;
+    const models = (data?.data || []).filter(
+      (m: any) => m.id?.endsWith("-free") || m.id === "big-pickle",
     );
     res.json({ data: models });
   } catch (err: any) {
-    res.status(502).json({ error: 'Failed to fetch models', detail: err.message });
+    res
+      .status(502)
+      .json({ error: "Failed to fetch models", detail: err.message });
   }
 });
 
-app.post('/api/ai/chat', async (req, res) => {
+app.post("/api/ai/chat", async (req, res) => {
   const { model, messages, context } = req.body;
-  if (!model || !messages) return res.status(400).json({ error: 'model and messages required' });
+  if (!model || !messages)
+    return res.status(400).json({ error: "model and messages required" });
 
   const systemMsg = {
-    role: 'system' as const,
-    content: `You are a professional educator and tutor built into the Nest learning platform. Your role is to help students understand the content they are learning.
+    role: "system" as const,
+    content:
+      `You are the user's best buddy — the one friend who somehow knows everything and explains it in a way that just clicks. You're built into the Nest learning platform, and your job is to make learning feel like a conversation with a smart friend, not a lecture.
 
 Your AI identity:
 - Your model identifier is: ${model}
@@ -594,11 +751,21 @@ Your AI identity:
 - Do not claim to be GPT, Claude, Gemini, or any other named model unless your model ID clearly indicates so.
 
 Identity & Style:
-- You are calm, friendly, and professional — like a patient university professor who genuinely cares about the student's understanding.
-- You NEVER assume what the student knows. Start from fundamentals when needed.
-- You are STRICT about accuracy. If something does not match established knowledge, you REJECT it clearly — like a teacher correcting a wrong answer. No misinformation, ever.
-- When you are unsure, say so honestly rather than guessing.
-- You adapt your explanation depth to the student's level based on their questions.
+- You are warm, casual, and genuinely enthusiastic — like a close friend who happens to know everything and loves sharing it with you.
+- You NEVER assume what the student knows. Start from fundamentals when needed, but skip the ones they've clearly already got.
+- You are STRICT about accuracy, even in buddy mode. If something is wrong, you say so directly and kindly, like a friend who won't let you walk around with bad info — never softened into agreement just to be nice.
+- When you are unsure, say so honestly rather than guessing — buddies don't bluff.
+- You adapt your tone and depth to the student's level and mood — more playful when they're relaxed, more focused when they're cramming.
+- Keep the friendliness real, not performative — no forced slang, no overdoing enthusiasm. Talk the way an actually smart, likable friend talks.
+
+Writing Style (Sound Human):
+- Never write like a generic AI assistant. Avoid inflated significance ("stands as a testament," "marks a pivotal moment," "plays a crucial role"), promotional language ("vibrant," "rich," "boasts a," "showcases"), and vague hedging ("it could be argued that," "some experts believe").
+- Avoid tacking on fake-depth "-ing" phrases at the end of sentences (e.g. "...highlighting its importance," "...reflecting broader trends"). Just state the point and stop.
+- Skip filler ("in order to," "due to the fact that," "it is important to note that") — say it plainly.
+- Vary sentence length and rhythm. Don't make every sentence the same shape. Short ones land harder when they follow a longer one.
+- Have a real reaction sometimes, not just neutral reporting — a friend has opinions and mixed feelings, not just facts.
+- Avoid em dash overuse, rule-of-three lists, and generic upbeat closers ("the future looks bright," "exciting times ahead").
+- Don't open with "Great question!" or close with "Let me know if you'd like me to expand!" — just answer like a person would.
 
 Teaching Rules:
 - Explain concepts step-by-step, building from basics.
@@ -615,77 +782,96 @@ Formatting:
 - Use clear headings (## or ###) to structure longer explanations.
 - Use bullet points and numbered lists for steps.
 - Bold key terms on first use.
-- Keep paragraphs short and readable.` + (context ? `
+- Keep paragraphs short and readable.` +
+      (context
+        ? `
 
 Course Context:
-The student is currently viewing: ${context}` : '')
+The student is currently viewing: ${context}`
+        : ""),
   };
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
   try {
-    const upstream = await fetch('https://opencode.ai/zen/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [systemMsg, ...messages],
-        stream: true,
-      }),
-    });
+    const upstream = await fetch(
+      "https://opencode.ai/zen/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [systemMsg, ...messages],
+          stream: true,
+        }),
+      },
+    );
 
     if (!upstream.ok) {
       const errText = await upstream.text();
-      res.write('data: ' + JSON.stringify({ error: 'Upstream error ' + upstream.status + ': ' + errText }) + '\n\n');
-      res.write('data: [DONE]\n\n');
+      res.write(
+        "data: " +
+          JSON.stringify({
+            error: "Upstream error " + upstream.status + ": " + errText,
+          }) +
+          "\n\n",
+      );
+      res.write("data: [DONE]\n\n");
       res.end();
       return;
     }
 
     const reader = upstream.body?.getReader();
     const decoder = new TextDecoder();
-    if (!reader) { res.end(); return; }
+    if (!reader) {
+      res.end();
+      return;
+    }
 
-    let buffer = '';
+    let buffer = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const raw = decoder.decode(value, { stream: true });
       buffer += raw;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          res.write(line + '\n\n');
+        if (line.startsWith("data: ")) {
+          res.write(line + "\n\n");
         }
       }
     }
     // flush remaining
-    if (buffer.trim()) res.write(buffer + '\n\n');
-    res.write('data: [DONE]\n\n');
+    if (buffer.trim()) res.write(buffer + "\n\n");
+    res.write("data: [DONE]\n\n");
   } catch (err: any) {
-    console.error('[AI Chat] Catch error:', err.message, err.stack?.substring(0, 200));
-    res.write('data: ' + JSON.stringify({ error: err.message }) + '\n\n');
-    res.write('data: [DONE]\n\n');
+    console.error(
+      "[AI Chat] Catch error:",
+      err.message,
+      err.stack?.substring(0, 200),
+    );
+    res.write("data: " + JSON.stringify({ error: err.message }) + "\n\n");
+    res.write("data: [DONE]\n\n");
   }
   res.end();
 });
 
 // ─── SPA fallback ───
-app.get('*', (_req, res) => {
-  const indexPath = path.join(publicDir, 'index.html');
+app.get("*", (_req, res) => {
+  const indexPath = path.join(publicDir, "index.html");
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).send('Frontend not built. Run: npm run build');
+    res.status(404).send("Frontend not built. Run: npm run build");
   }
 });
 
 // ─── Start ───
-httpServer.listen(PORT, '0.0.0.0', () => {});
+httpServer.listen(PORT, "0.0.0.0", () => {});
 
 // ─── Graceful Shutdown ───
 let shuttingDown = false;
@@ -693,7 +879,9 @@ const shutdown = (signal: string) => {
   if (shuttingDown) return;
   shuttingDown = true;
   if (tunnelChild) {
-    try { tunnelChild.kill('SIGTERM'); } catch {}
+    try {
+      tunnelChild.kill("SIGTERM");
+    } catch {}
     tunnelChild = null;
     tunnelPublicUrl = null;
   }
@@ -701,5 +889,5 @@ const shutdown = (signal: string) => {
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 3000);
 };
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
