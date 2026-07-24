@@ -417,6 +417,86 @@ function CourseCard({
   );
 }
 
+// ─── AI Tutor Curriculum Context Helpers ───
+function getAllFolders(items: FileItem[]): string[] {
+  return items.filter((i) => i.type === "folder").map((f) => f.name);
+}
+
+function flattenVideos(items: FileItem[]): FileItem[] {
+  const out: FileItem[] = [];
+  for (const item of items) {
+    if (item.type === "folder" && item.children) {
+      out.push(...flattenVideos(item.children));
+    } else if (item.type !== "folder") {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+function findFolderPath(items: FileItem[], targetPath: string): string | null {
+  for (const item of items) {
+    if (item.type === "folder" && item.children) {
+      const child = item.children.find((c) => c.path === targetPath);
+      if (child) return item.name;
+      const deeper = findFolderPath(item.children, targetPath);
+      if (deeper) return deeper;
+    }
+  }
+  return null;
+}
+
+function getVideosInFolder(items: FileItem[], folderName: string): FileItem[] {
+  for (const item of items) {
+    if (item.type === "folder" && item.name === folderName) {
+      return flattenVideos(item.children || []);
+    }
+  }
+  return [];
+}
+
+function buildFileContext(
+  items: FileItem[],
+  activeFile: FileItem,
+  data?: { name?: string } | null,
+  courseId?: string,
+): string {
+  const courseName = data?.name || courseId || "Unknown Course";
+  const folders = getAllFolders(items);
+  const allVideos = flattenVideos(items);
+  const folderName = findFolderPath(items, activeFile.path);
+
+  const lines: string[] = [];
+  lines.push(`COURSE_NAME: ${courseName}`);
+
+  if (folders.length > 0) {
+    lines.push(`CURRICULUM_SECTIONS [in order]: ${folders.join(" | ")}`);
+    if (folderName) {
+      const pos = folders.indexOf(folderName) + 1;
+      lines.push(`CURRENT_SECTION: ${folderName} (position ${pos} of ${folders.length} sections)`);
+    }
+  }
+
+  // Lessons: scoped to current section if in a folder, otherwise all
+  const sectionVideos = folderName ? getVideosInFolder(items, folderName) : allVideos;
+  if (sectionVideos.length > 0) {
+    lines.push(`LESSONS_IN_SECTION [in order]: ${sectionVideos.map((v) => v.name).join(" | ")}`);
+  }
+
+  const totalVideos = allVideos.length;
+  const currentIdx = allVideos.findIndex((v) => v.path === activeFile.path);
+  if (currentIdx >= 0) {
+    const sectionIdx = sectionVideos.findIndex((v) => v.path === activeFile.path);
+    const sectionPos = folderName && sectionIdx >= 0
+      ? `${sectionIdx + 1} of ${sectionVideos.length} in this section, `
+      : "";
+    lines.push(
+      `CURRENT_LESSON: ${activeFile.name} (${sectionPos}${currentIdx + 1} of ${totalVideos} total in course)`,
+    );
+  }
+
+  return lines.join("\n");
+}
 // ─── CourseDetailOverlay ───
 function CourseDetailOverlay({
   courseId,
@@ -1503,7 +1583,7 @@ function CourseDetailOverlay({
             {/* ─── AI Tutor Chat (Desktop only inline bottom panel) ─── */}
             <div className="hidden md:block border-t border-base-300 bg-base-100/50">
               <div className="h-[600px] max-h-[75vh] flex flex-col">
-                <AIChat key={activeFile.path} context={`Course: ${data?.name || courseId}, File: ${activeFile.name} (${activeFile.type})`} />
+                <AIChat key={activeFile.path} context={buildFileContext(items, activeFile, data, courseId)} />
               </div>
             </div>
           </div>
@@ -1513,27 +1593,29 @@ function CourseDetailOverlay({
       {/* ─── Floating AI Chat Bubble (FAB) ─── */}
       {activeFile && (
         <>
-          {/* Mobile full-screen AI Chat overlay */}
-          {showAIChat && (
-            <div className="fixed inset-0 z-[100] bg-base-100 flex flex-col md:hidden">
-              <div className="flex-1 flex flex-col min-h-0 pt-safe">
-                <AIChat key={`mobile-${activeFile.path}`} context={`Course: ${data?.name || courseId}, File: ${activeFile.name} (${activeFile.type})`} onClose={() => setShowAIChat(false)} />
-              </div>
-            </div>
-          )}
-
-          {/* FAB bubble (Mobile only) */}
-          <button
-            onClick={() => setShowAIChat((v) => !v)}
-            className={`md:hidden fixed bottom-6 right-6 z-[95] w-14 h-14 rounded-2xl rounded-br-sm shadow-lg flex items-center justify-center transition-all duration-300 ${
+          {/* Mobile full-screen AI Chat overlay (always mounted, animated) */}
+          <div
+            className={`fixed inset-0 z-[100] bg-base-100 flex flex-col md:hidden transition-all duration-300 ease-out ${
               showAIChat
-                ? "bg-error text-white scale-110"
-                : "bg-primary text-primary-content hover:scale-110"
+                ? "opacity-100 translate-y-0 pointer-events-auto"
+                : "opacity-0 translate-y-full pointer-events-none"
             }`}
-            title={showAIChat ? "Close AI Tutor" : "Open AI Tutor"}
           >
-            {showAIChat ? <X size={22} /> : <MessageSquare size={22} className="fill-current" />}
-          </button>
+            <div className="flex-1 flex flex-col min-h-0 pt-safe">
+              <AIChat key={`mobile-${activeFile.path}`} context={buildFileContext(items, activeFile, data, courseId)} onClose={() => setShowAIChat(false)} />
+            </div>
+          </div>
+
+          {/* FAB bubble (Mobile only) — hidden when chat is open */}
+          {!showAIChat && (
+            <button
+              onClick={() => setShowAIChat(true)}
+              className="md:hidden fixed bottom-6 right-6 z-[105] w-14 h-14 rounded-2xl rounded-br-sm shadow-lg shadow-primary/25 flex items-center justify-center transition-all duration-300 hover:shadow-xl hover:shadow-primary/30 active:scale-95 bg-primary text-primary-content hover:scale-110 animate-in fade-in slide-in-from-bottom-4"
+              title="Open AI Tutor"
+            >
+              <Bot size={22} />
+            </button>
+          )}
         </>
       )}
 
