@@ -548,78 +548,94 @@ function MarkdownRenderer({
   content: string;
   isStreaming?: boolean;
 }) {
+  // During streaming, skip rehypeKatex so partial $...$ tokens don't cause
+  // layout glitches — remarkMath still parses but katex renders after stream ends
+  const rehypePlugins: any[] = isStreaming
+    ? [rehypeHighlight]
+    : [rehypeHighlight, rehypeKatex];
+
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeHighlight, rehypeKatex]}
-      components={{
-        code({ className, children, ...rest }) {
-          const match = /language-(\w+)/.exec(className || "");
-          const lang = match?.[1];
-          if (lang === "mermaid") {
+    <div className="overflow-x-auto max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1 [&_.katex]:text-[0.85em]">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={rehypePlugins}
+        components={{
+          p({ children }) {
+            return <p className="mb-2 last:mb-0 text-[11px] leading-relaxed">{children}</p>;
+          },
+          h1({ children }) {
+            return <h1 className="text-base font-bold mt-3 mb-1.5 text-base-content">{children}</h1>;
+          },
+          h2({ children }) {
+            return <h2 className="text-sm font-bold mt-3 mb-1.5 text-base-content border-b border-base-300 pb-0.5">{children}</h2>;
+          },
+          h3({ children }) {
+            return <h3 className="text-xs font-bold mt-2 mb-1 text-base-content">{children}</h3>;
+          },
+          code({ className, children }) {
+            const match = /language-(\w+)/.exec(className || "");
+            const lang = match?.[1];
+            if (lang === "mermaid") {
+              return (
+                <MermaidBlock
+                  chart={String(children)}
+                  isStreaming={isStreaming}
+                />
+              );
+            }
+            if (match) {
+              return <code className={className}>{children}</code>;
+            }
+            // Inline code
             return (
-              <MermaidBlock
-                chart={String(children)}
-                isStreaming={isStreaming}
-              />
-            );
-          }
-          if (match) {
-            // Fenced code block — highlight.js will add hljs classes via rehype-highlight
-            return <code className={className}>{children}</code>;
-          }
-          // Inline code
-          return (
-            <code className="bg-base-300/60 px-1 py-0.5 rounded text-[10px] text-primary/90">
-              {children}
-            </code>
-          );
-        },
-        pre({ children }) {
-          return <CopyableCodeBlock>{children}</CopyableCodeBlock>;
-        },
-        ol({ children }) {
-          return <ol className="list-decimal pl-5 my-1 space-y-0.5 text-[11px]">{children}</ol>;
-        },
-        ul({ children }) {
-          return <ul className="list-disc pl-5 my-1 space-y-0.5 text-[11px]">{children}</ul>;
-        },
-        li({ children }) {
-          return <li className="marker:text-base-content/40">{children}</li>;
-        },
-
-
-
-
-
-
-        table({ children }) {
-          return (
-            <div className="overflow-x-auto my-2 w-full">
-              <table className="table table-xs table-zebra w-full text-[11px] border border-base-300 rounded-lg">
+              <code className="bg-base-300/60 px-1 py-0.5 rounded text-[10px] text-primary/90 break-words">
                 {children}
-              </table>
-            </div>
-          );
-        },
-        thead({ children }) {
-          return <thead className="bg-base-300/50 text-base-content/80 text-[10px] uppercase tracking-wider font-bold">{children}</thead>;
-        },
-        tbody({ children }) {
-          return <tbody className="divide-y divide-base-300/50">{children}</tbody>;
-        },
-        tr({ children }) {
-          return <tr className="hover:bg-base-300/20 transition-colors">{children}</tr>;
-        },
-        th({ children }) {
-          return <th className="px-3 py-1.5 text-left whitespace-nowrap border-b border-base-300">{children}</th>;
-        },
-        td({ children }) {
-          return <td className="px-3 py-1.5 border-b border-base-300/30">{children}</td>;
-        },
-      }}
-    >
-      {content}
-    </ReactMarkdown>
+              </code>
+            );
+          },
+          pre({ children }) {
+            return <CopyableCodeBlock>{children}</CopyableCodeBlock>;
+          },
+          ol({ children }) {
+            return <ol className="list-decimal pl-5 my-1 space-y-0.5 text-[11px]">{children}</ol>;
+          },
+          ul({ children }) {
+            return <ul className="list-disc pl-5 my-1 space-y-0.5 text-[11px]">{children}</ul>;
+          },
+          li({ children }) {
+            return <li className="marker:text-base-content/40 text-[11px]">{children}</li>;
+          },
+          blockquote({ children }) {
+            return <blockquote className="border-l-2 border-primary/40 pl-3 my-2 text-base-content/70 italic text-[11px]">{children}</blockquote>;
+          },
+          table({ children }) {
+            return (
+              <div className="overflow-x-auto my-2 w-full">
+                <table className="table table-xs table-zebra w-full text-[11px] border border-base-300 rounded-lg">
+                  {children}
+                </table>
+              </div>
+            );
+          },
+          thead({ children }) {
+            return <thead className="bg-base-300/50 text-base-content/80 text-[10px] uppercase tracking-wider font-bold">{children}</thead>;
+          },
+          tbody({ children }) {
+            return <tbody className="divide-y divide-base-300/50">{children}</tbody>;
+          },
+          tr({ children }) {
+            return <tr className="hover:bg-base-300/20 transition-colors">{children}</tr>;
+          },
+          th({ children }) {
+            return <th className="px-3 py-1.5 text-left whitespace-nowrap border-b border-base-300">{children}</th>;
+          },
+          td({ children }) {
+            return <td className="px-3 py-1.5 border-b border-base-300/30">{children}</td>;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }
