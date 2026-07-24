@@ -5,8 +5,8 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import "katex/dist/katex.min.css";
-import "highlight.js/styles/github-dark-dimmed.css";
-import "highlight.js/lib/languages/dart";
+import "highlight.js/styles/atom-one-dark.css";
+import dart from "highlight.js/lib/languages/dart";
 import { Loader, Send, Bot, User, ChevronDown, Plus, Copy, Check } from "lucide-react";
 
 const API = window.location.origin;
@@ -526,7 +526,7 @@ function CopyableCodeBlock({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative group">
-      <pre className="overflow-x-auto bg-base-300/40 border border-base-300/50 rounded-lg p-3 text-[10px] my-1">
+      <pre className="overflow-x-auto bg-[#282c34] text-[#abb2bf] border border-base-300/50 rounded-lg p-3 text-[10px] my-1">
         {children}
       </pre>
       <button
@@ -550,18 +550,19 @@ function MarkdownRenderer({
 }) {
   // During streaming, skip rehypeKatex so partial $...$ tokens don't cause
   // layout glitches — remarkMath still parses but katex renders after stream ends
+  const highlightPlugin = [rehypeHighlight, { languages: { dart } }];
   const rehypePlugins: any[] = isStreaming
-    ? [rehypeHighlight]
-    : [rehypeHighlight, rehypeKatex];
+    ? [highlightPlugin]
+    : [highlightPlugin, rehypeKatex];
 
   return (
-    <div className="overflow-x-auto max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:my-6 [&_.katex-display]:py-4 [&_.katex]:text-[0.85em]">
+    <div className="overflow-x-auto max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:my-6 [&_.katex-display]:py-4 [&_.katex]:align-middle [&_.katex-display]:block [&_.katex]:mx-0.5">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={rehypePlugins}
         components={{
           p({ children }) {
-            return <p className="mb-2 last:mb-0 text-[11px] leading-relaxed">{children}</p>;
+            return <p className="mb-2 last:mb-0 text-[11px] leading-[2]">{children}</p>;
           },
           h1({ children }) {
             return <h1 className="text-base font-bold mt-4 mb-3 text-base-content">{children}</h1>;
@@ -588,7 +589,7 @@ function MarkdownRenderer({
             }
             // Inline code
             return (
-              <code className="bg-base-300/60 px-1 py-0.5 rounded text-[10px] text-primary/90 break-words">
+              <code className="bg-[#282c34] text-[#abb2bf] px-1.5 py-0.5 rounded text-[10px] break-words">
                 {children}
               </code>
             );
