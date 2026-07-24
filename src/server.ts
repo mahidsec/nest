@@ -49,7 +49,22 @@ const VALID_ICONS = [
 const getCourses = async (): Promise<Course[]> => {
   try {
     const data = await readFile(COURSES_PATH, 'utf-8');
-    return JSON.parse(data);
+    const courses: Course[] = JSON.parse(data);
+    
+    // Migration: add sortOrder if missing
+    let migrated = false;
+    courses.forEach((c, i) => {
+      if (typeof c.sortOrder !== 'number') {
+        c.sortOrder = i;
+        migrated = true;
+      }
+    });
+    
+    if (migrated) {
+      await saveCourses(courses).catch(() => {});
+    }
+    
+    return courses;
   } catch { return []; }
 };
 
@@ -323,6 +338,7 @@ app.post('/api/tunnel/stop', (_req, res) => {
 app.get('/api/courses', async (_req, res) => {
   try {
     const courses = await getCourses();
+    courses.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
     const enriched: CourseWithVideos[] = courses.map((c) => ({
       ...c,
       totalVideos: getCachedVideoCount(c),
@@ -374,6 +390,25 @@ app.delete('/api/courses/:id', async (req, res) => {
   if (!target) return res.status(404).json({ error: 'Course not found' });
   invalidateVideoCount(target.localPath);
   await saveCourses(courses.filter((c) => c.id !== req.params.id));
+  res.json({ success: true });
+});
+
+app.put('/api/courses/reorder', async (req, res) => {
+  const { orderedIds } = req.body;
+  if (!Array.isArray(orderedIds)) return res.status(400).json({ error: 'orderedIds array required' });
+
+  const courses = await getCourses();
+  const validIds = new Set(courses.map(c => c.id));
+  if (!orderedIds.every(id => validIds.has(id)) || orderedIds.length !== courses.length) {
+    return res.status(400).json({ error: 'Invalid orderedIds' });
+  }
+
+  const idToIndex = new Map(orderedIds.map((id, index) => [id, index]));
+  courses.forEach(c => {
+    c.sortOrder = idToIndex.get(c.id) ?? 0;
+  });
+
+  await saveCourses(courses);
   res.json({ success: true });
 });
 

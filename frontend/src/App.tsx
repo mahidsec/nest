@@ -44,7 +44,8 @@ import {
   Settings,
   Play,
   Bot,
-  MessageSquare
+  MessageSquare,
+  GripVertical
 } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-clike";
@@ -61,6 +62,23 @@ import "prismjs/components/prism-java";
 import "prismjs/components/prism-markup";
 import "prismjs/components/prism-rust";
 import "prismjs/themes/prism-tomorrow.css";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  DragStartEvent,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import AIChat from "./AIChat";
 
 // ─── Local Type Definitions ───
@@ -362,6 +380,46 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
 }
 
 // ─── Course Card ───
+function SortableCourseCard({
+  course,
+  watchedCount,
+  onClick,
+  onDelete,
+}: {
+  course: CourseWithVideos;
+  watchedCount: number;
+  onClick: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: course.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : undefined,
+    opacity: isDragging ? 0.4 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className="relative w-full">
+      {/* Drag handle — desktop only */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="hidden sm:flex absolute -top-1 -left-1 z-20 p-1 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-grab active:cursor-grabbing text-base-content/50 hover:text-base-content transition-opacity"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical size={14} />
+      </button>
+      <CourseCard
+        course={course}
+        watchedCount={watchedCount}
+        onClick={onClick}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
 function CourseCard({
   course,
   watchedCount,
@@ -377,7 +435,7 @@ function CourseCard({
   return (
     <button
       onClick={onClick}
-      className="relative flex flex-col p-4 bg-base-200 border border-base-300 rounded-md card-hover text-left overflow-hidden group"
+      className="relative flex flex-col p-4 bg-base-200 border border-base-300 rounded-md card-hover text-left overflow-hidden group h-full w-full"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="p-2 rounded-lg bg-primary">
@@ -1986,6 +2044,32 @@ export default function App() {
     fetchCourses();
   };
 
+  // ─── Drag & Drop Reorder ───
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveId(null);
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setCourses((items) => {
+        const oldIndex = items.findIndex((i) => i.id === active.id);
+        const newIndex = items.findIndex((i) => i.id === over.id);
+        const newArray = arrayMove(items, oldIndex, newIndex);
+        fetch(`${API}/api/courses/reorder`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderedIds: newArray.map(c => c.id) })
+        }).catch(() => {});
+        return newArray;
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-base-100">
       {/* Header */}
@@ -2058,17 +2142,42 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {courses.map((c) => (
-              <CourseCard
-                key={c.id}
-                course={c}
-                watchedCount={globalProgress[c.id] || 0}
-                onClick={() => openCourse(c.id)}
-                onDelete={() => deleteCourse(c.id)}
-              />
-            ))}
-          </div>
+          <>
+            {/* Desktop: DnD-enabled grid */}
+            <div className="hidden sm:grid grid-cols-2 md:grid-cols-3 gap-3">
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <SortableContext items={courses.map((c) => c.id)} strategy={rectSortingStrategy}>
+                  {courses.map((c) => (
+                    <SortableCourseCard
+                      key={c.id}
+                      course={c}
+                      watchedCount={globalProgress[c.id] || 0}
+                      onClick={() => openCourse(c.id)}
+                      onDelete={() => deleteCourse(c.id)}
+                    />
+                  ))}
+                </SortableContext>
+                <DragOverlay>
+                  {activeId ? (() => {
+                    const c = courses.find((x) => x.id === activeId);
+                    return c ? <CourseCard course={c} watchedCount={globalProgress[c.id] || 0} onClick={() => {}} onDelete={() => {}} /> : null;
+                  })() : null}
+                </DragOverlay>
+              </DndContext>
+            </div>
+            {/* Mobile: static grid (no drag) */}
+            <div className="sm:hidden grid grid-cols-1 gap-3">
+              {courses.map((c) => (
+                <CourseCard
+                  key={c.id}
+                  course={c}
+                  watchedCount={globalProgress[c.id] || 0}
+                  onClick={() => openCourse(c.id)}
+                  onDelete={() => deleteCourse(c.id)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 

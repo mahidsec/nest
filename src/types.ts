@@ -8,6 +8,7 @@ export interface Course {
   icon: string;
   createdAt: string;
   totalVideos?: number;
+  sortOrder?: number;
 }
 
 export type FileType = 'video' | 'text' | 'code' | 'document' | 'link' | 'image' | 'other';
