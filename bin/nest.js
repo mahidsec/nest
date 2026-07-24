@@ -19,7 +19,7 @@ const progressPath = join(dataDir, "course_progress.json");
 if (!existsSync(coursesPath)) writeFileSync(coursesPath, "[]");
 if (!existsSync(progressPath)) writeFileSync(progressPath, "{}");
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const PORT = Number(process.env.PORT) || 6969;
 
 let serverProcess = null;

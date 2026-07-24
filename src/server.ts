@@ -24,7 +24,7 @@ app.use(express.json());
 // ─── Security headers ───
 app.use((_req, res, next) => {
   res.setHeader('Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data:; media-src 'self' blob:;");
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self';");
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -526,6 +526,112 @@ app.put('/api/courses/:id/progress', async (req, res) => {
   else delete all[courseId][filePath];
   await saveCourseProgressData(all);
   res.json(all[courseId]);
+});
+
+
+// ─── AI Chat Proxy (free models, no API key) ───
+
+app.get('/api/ai/models', async (_req, res) => {
+  try {
+    const resp = await fetch('https://opencode.ai/zen/v1/models');
+    if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
+    const data = await resp.json() as any;
+    const models = (data?.data || []).filter((m: any) =>
+      m.id?.endsWith('-free') || m.id === 'big-pickle'
+    );
+    res.json({ data: models });
+  } catch (err: any) {
+    res.status(502).json({ error: 'Failed to fetch models', detail: err.message });
+  }
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  const { model, messages, context } = req.body;
+  if (!model || !messages) return res.status(400).json({ error: 'model and messages required' });
+
+  const systemMsg = {
+    role: 'system' as const,
+    content: `You are a professional educator and tutor. Your role is to help students understand the content they are learning.
+
+Identity & Style:
+- You are calm, friendly, and professional — like a patient university professor who genuinely cares about the student's understanding.
+- You NEVER assume what the student knows. Start from fundamentals when needed.
+- You are STRICT about accuracy. If something does not match established knowledge, you REJECT it clearly — like a teacher correcting a wrong answer. No misinformation, ever.
+- When you are unsure, say so honestly rather than guessing.
+- You adapt your explanation depth to the student's level based on their questions.
+
+Teaching Rules:
+- Explain concepts step-by-step, building from basics.
+- Use analogies and real-world examples to make abstract ideas concrete.
+- When explaining processes, relationships, or hierarchies, use Mermaid diagrams (fenced code block with \`\`\`mermaid).
+- When explaining formulas or math, use LaTeX notation: inline $...$ or block $$...$$.
+- Use code examples when relevant (with proper language-tagged fenced code blocks).
+- If the student seems confused, break it down further with simpler language.
+- Periodically ask follow-up questions to check understanding.
+- Reference the course context provided when it helps clarify concepts.
+- If the student's premise is wrong, correct it firmly but kindly — never validate incorrect information.
+
+Formatting:
+- Use clear headings (## or ###) to structure longer explanations.
+- Use bullet points and numbered lists for steps.
+- Bold key terms on first use.
+- Keep paragraphs short and readable.` + (context ? `
+
+Course Context:
+The student is currently viewing: ${context}` : '')
+  };
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    const upstream = await fetch('https://opencode.ai/zen/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [systemMsg, ...messages],
+        stream: true,
+      }),
+    });
+
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      res.write('data: ' + JSON.stringify({ error: 'Upstream error ' + upstream.status + ': ' + errText }) + '\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
+    const reader = upstream.body?.getReader();
+    const decoder = new TextDecoder();
+    if (!reader) { res.end(); return; }
+
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const raw = decoder.decode(value, { stream: true });
+      buffer += raw;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          res.write(line + '\n\n');
+        }
+      }
+    }
+    // flush remaining
+    if (buffer.trim()) res.write(buffer + '\n\n');
+    res.write('data: [DONE]\n\n');
+  } catch (err: any) {
+    console.error('[AI Chat] Catch error:', err.message, err.stack?.substring(0, 200));
+    res.write('data: ' + JSON.stringify({ error: err.message }) + '\n\n');
+    res.write('data: [DONE]\n\n');
+  }
+  res.end();
 });
 
 // ─── SPA fallback ───

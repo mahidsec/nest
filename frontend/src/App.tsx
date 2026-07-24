@@ -43,6 +43,8 @@ import {
   Globe2,
   Settings,
   Play,
+  Bot,
+  MessageSquare
 } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-clike";
@@ -59,6 +61,7 @@ import "prismjs/components/prism-java";
 import "prismjs/components/prism-markup";
 import "prismjs/components/prism-rust";
 import "prismjs/themes/prism-tomorrow.css";
+import AIChat from "./AIChat";
 
 // ─── Local Type Definitions ───
 type FileType =
@@ -429,6 +432,7 @@ function CourseDetailOverlay({
   const [fileContent, setFileContent] = useState<any>(null);
   const [watched, setWatched] = useState<Record<string, boolean>>({});
   const [viewTab, setViewTab] = useState<"preview" | "code">("preview");
+  const [showAIChat, setShowAIChat] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1495,8 +1499,42 @@ function CourseDetailOverlay({
                 </div>
               </div>
             )}
+
+            {/* ─── AI Tutor Chat (Desktop only inline bottom panel) ─── */}
+            <div className="hidden md:block border-t border-base-300 bg-base-100/50">
+              <div className="h-[600px] max-h-[75vh] flex flex-col">
+                <AIChat key={activeFile.path} context={`Course: ${data?.name || courseId}, File: ${activeFile.name} (${activeFile.type})`} />
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* ─── Floating AI Chat Bubble (FAB) ─── */}
+      {activeFile && (
+        <>
+          {/* Mobile full-screen AI Chat overlay */}
+          {showAIChat && (
+            <div className="fixed inset-0 z-[100] bg-base-100 flex flex-col md:hidden">
+              <div className="flex-1 flex flex-col min-h-0 pt-safe">
+                <AIChat key={`mobile-${activeFile.path}`} context={`Course: ${data?.name || courseId}, File: ${activeFile.name} (${activeFile.type})`} onClose={() => setShowAIChat(false)} />
+              </div>
+            </div>
+          )}
+
+          {/* FAB bubble (Mobile only) */}
+          <button
+            onClick={() => setShowAIChat((v) => !v)}
+            className={`md:hidden fixed bottom-6 right-6 z-[95] w-14 h-14 rounded-2xl rounded-br-sm shadow-lg flex items-center justify-center transition-all duration-300 ${
+              showAIChat
+                ? "bg-error text-white scale-110"
+                : "bg-primary text-primary-content hover:scale-110"
+            }`}
+            title={showAIChat ? "Close AI Tutor" : "Open AI Tutor"}
+          >
+            {showAIChat ? <X size={22} /> : <MessageSquare size={22} className="fill-current" />}
+          </button>
+        </>
       )}
 
       {/* ─── LOADING STATE ─── */}

@@ -400,3 +400,69 @@ pre[class*="language-"] {
 .token.important, .token.bold { font-weight: bold; }
 .token.italic { font-style: italic; }
 .token.entity { cursor: help; }
+
+/* ─── AI Chat markdown styling ─── */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  font-weight: 700;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+}
+.markdown-content h1 { font-size: 1rem; }
+.markdown-content h2 { font-size: 0.875rem; }
+.markdown-content h3 { font-size: 0.8rem; }
+.markdown-content p { margin: 0.25em 0; }
+.markdown-content ul, .markdown-content ol {
+  padding-left: 1.25em;
+  margin: 0.25em 0;
+}
+.markdown-content li { margin: 0.15em 0; }
+.markdown-content blockquote {
+  border-left: 2px solid var(--color-primary);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  opacity: 0.8;
+}
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 10px;
+  width: 100%;
+}
+.markdown-content th, .markdown-content td {
+  border: 1px solid var(--color-base-300);
+  padding: 4px 8px;
+  text-align: left;
+}
+.markdown-content th {
+  background: var(--color-base-300);
+  font-weight: 700;
+}
+.markdown-content pre {
+  background: var(--color-base-300);
+  border-radius: 6px;
+  padding: 0.75em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.markdown-content code {
+  font-size: 10px;
+}
+.markdown-content img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--color-base-300);
+  margin: 0.75em 0;
+}
+.markdown-content strong {
+  font-weight: 700;
+}
+.markdown-content a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
