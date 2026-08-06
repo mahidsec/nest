@@ -2,7 +2,7 @@
 import { spawn, execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, unlinkSync, openSync } from "fs";
 import { homedir, networkInterfaces, platform, arch } from "os";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +25,71 @@ const PORT = Number(process.env.PORT) || 6969;
 let serverProcess = null;
 let tunnelProcess = null;
 let tunnelUrl = null;
+let trayProcess = null;
+
+// ─── System tray singleton ───
+const TRAY_PID_PATH = join(homedir(), ".nest", "tray.pid");
+
+function removeTrayLock() {
+  try { unlinkSync(TRAY_PID_PATH); } catch {}
+}
+
+function isTrayRunning() {
+  try {
+    const pid = Number(readFileSync(TRAY_PID_PATH, "utf8").trim());
+    if (pid <= 0) return false;
+    try { process.kill(pid, 0); } catch { return false; }
+    if (platform === "linux") {
+      try {
+        if (!readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("--tray")) return false;
+      } catch { return false; }
+    }
+    return true;
+  } catch { return false; }
+}
+
+function killTray() {
+  try { trayProcess?.kill("SIGTERM"); } catch {}
+  try {
+    const pid = Number(readFileSync(TRAY_PID_PATH, "utf8").trim());
+    if (pid > 0) { try { process.kill(pid, "SIGTERM"); } catch {} }
+  } catch {}
+  trayProcess = null;
+}
+
+// ─── Autostart on login ───
+const AUTOSTART_FILE =
+  platform() === "linux"
+    ? join(homedir(), ".config", "autostart", "nest.desktop")
+    : platform() === "darwin"
+      ? join(homedir(), "Library", "LaunchAgents", "com.nest.server.plist")
+      : null; // ponytail: Windows registry (HKCU Run) not implemented; add when a Windows user asks
+
+function isAutostartEnabled() {
+  return AUTOSTART_FILE ? existsSync(AUTOSTART_FILE) : false;
+}
+
+function setAutostart(on) {
+  if (!AUTOSTART_FILE) return false;
+  if (!on) {
+    try { unlinkSync(AUTOSTART_FILE); } catch {}
+    return true;
+  }
+  mkdirSync(dirname(AUTOSTART_FILE), { recursive: true });
+  if (platform() === "linux") {
+    const exec = `\"${process.execPath}\" \"${__filename}\" --auto`;
+    writeFileSync(
+      AUTOSTART_FILE,
+      `[Desktop Entry]\nType=Application\nName=Nest\nExec=${exec}\nX-GNOME-Autostart-enabled=true\n`
+    );
+  } else {
+    writeFileSync(
+      AUTOSTART_FILE,
+      `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>com.nest.server</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>${process.execPath}</string>\n    <string>${__filename}</string>\n    <string>--auto</string>\n  </array>\n  <key>RunAtLoad</key><true/>\n</dict>\n</plist>\n`
+    );
+  }
+  return true;
+}
 
 // ─── Cloudflared auto-install ───
 const NEST_BIN_DIR = join(homedir(), ".nest", "bin");
@@ -73,10 +138,20 @@ function stopTunnel() {
     .then(() => { tunnelUrl = null; });
 }
 
+function autostartLabel() {
+  const enabled = isAutostartEnabled();
+  return (enabled ? "\u2605" : "\u2606") + "  Auto Start on Login " + (enabled ? "(Enabled)" : "(Disabled)");
+}
+
+function getTrayAutostartTitle(enabled) {
+  return "Auto Start on Login " + (enabled ? "(Enabled)" : "(Disabled)");
+}
+
 const OPTIONS = [
   { label: "\u2605  Web UI (Open in Browser)", action: "webui" },
   { label: "\u2606  Hide to Tray (Background)", action: "background" },
   { label: "\u2606  Cloudflare Tunnel", action: "tunnel" },
+  { label: autostartLabel(), action: "autostart" },
   { label: "\u2606  Exit", action: "exit" },
 ];
 
@@ -165,7 +240,23 @@ function startServer(tunnel = false) {
   const cmd = existsSync(distServer)
     ? ["node", distServer]
     : [join(root, "node_modules", ".bin", "tsx"), join(root, "src", "server.ts")];
-  serverProcess = spawn(cmd[0], cmd.slice(1), { stdio: "inherit", env });
+    
+  let stdioConfig = "ignore";
+  try {
+    const logPath = join(homedir(), ".nest", "server.log");
+    const out = openSync(logPath, "a");
+    stdioConfig = ["ignore", out, out];
+  } catch (e) {
+    // fallback
+  }
+  
+  serverProcess = spawn(cmd[0], cmd.slice(1), { 
+    stdio: stdioConfig, 
+    env,
+    detached: true
+  });
+  serverProcess.unref();
+  
   serverProcess.on("error", () => {});
   serverProcess.on("close", () => { serverProcess = null; });
 }
@@ -250,6 +341,7 @@ async function startTunnel() {
 
 // ─── System Tray ───
 async function startTray() {
+  if (isTrayRunning()) return null;
   try {
     const imported = await import("systray2");
     const SysTray = imported.default?.default || imported.default || imported;
@@ -268,7 +360,10 @@ async function startTray() {
         title: "Nest Server",
         tooltip: "Nest Server \u2014 http://localhost:" + PORT,
         items: [
+          { title: `Nest on port ${PORT}`, tooltip: "", checked: false, enabled: false },
+          { title: "<SEPARATOR>", tooltip: "", checked: false, enabled: true },
           { title: "Open Web UI", tooltip: "Open in browser", checked: false, enabled: true },
+          { title: getTrayAutostartTitle(isAutostartEnabled()), tooltip: "Launch Nest when you log in", checked: false, enabled: true },
           { title: "Exit", tooltip: "Stop server and exit", checked: false, enabled: true },
         ],
       },
@@ -279,6 +374,12 @@ async function startTray() {
     systray.onClick((action) => {
       if (action.item.title === "Open Web UI") {
         openBrowser();
+      } else if (action.item.title.startsWith("Auto Start on Login")) {
+        const on = !isAutostartEnabled();
+        if (setAutostart(on)) {
+          action.item.title = getTrayAutostartTitle(on);
+          systray.sendAction({ type: "update-item", item: action.item });
+        }
       } else if (action.item.title === "Exit") {
         (async () => {
           await stopTunnel();
@@ -290,6 +391,10 @@ async function startTray() {
     });
 
     await systray.ready();
+    writeFileSync(TRAY_PID_PATH, String(process.pid));
+    process.on("exit", removeTrayLock);
+    process.on("SIGTERM", () => process.exit(0));
+    process.on("SIGINT", () => process.exit(0));
     console.log("  \x1b[32m\u2713\x1b[0m System tray active");
     return systray;
   } catch (err) {
@@ -321,18 +426,27 @@ async function handleSelect() {
       serverProcess.unref();
     }
 
-    spawn("node", [__filename, "--tray"], {
-      stdio: "ignore",
-      detached: true,
-    }).unref();
-
     process.exit(0);
+  } else if (opt.action === "autostart") {
+    const on = !isAutostartEnabled();
+    if (setAutostart(on)) {
+      opt.label = autostartLabel();
+      console.log(
+        on
+          ? "  \x1b[32m\u2713\x1b[0m Auto start on login enabled"
+          : "  \x1b[33m\u25CB\x1b[0m Auto start on login disabled"
+      );
+    } else {
+      console.log("  \x1b[33m\u26A0\x1b[0m Autostart not supported on this platform");
+    }
+    setTimeout(() => printMenu(), 900);
   } else if (opt.action === "exit") {
     process.stdout.write("\x1B[2J\x1B[0;0H");
     console.log();
     console.log("  \x1b[32m\u2713\x1b[0m Shutting down server...");
     await stopTunnel();
     await killServer();
+    killTray();
     console.log("  \x1b[90mBye!\x1b[0m");
     console.log();
     process.exit(0);
@@ -341,13 +455,18 @@ async function handleSelect() {
 
 // ─── If --tray flag, just run tray ───
 if (process.argv.includes("--tray")) {
-  startTray();
+  if (isTrayRunning()) process.exit(0);
+  startTray().then((t) => { if (!t) process.exit(0); });
   setInterval(() => {}, 1000 * 60 * 60);
 } else {
-  // ─── If --auto flag, start silently ───
+  // ─── If --auto flag, start silently (used by autostart) ───
   if (process.argv.includes("--auto")) {
     startServer();
     if (serverProcess) serverProcess.unref();
+    if (!isTrayRunning()) {
+      const t = spawn("node", [__filename, "--tray"], { stdio: "ignore", detached: true });
+      t.unref();
+    }
     process.exit(0);
   }
 
@@ -359,6 +478,15 @@ if (process.argv.includes("--tray")) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
+
+    // Tray icon visible as soon as the TUI starts (single instance)
+    if (!isTrayRunning()) {
+      trayProcess = spawn("node", [__filename, "--tray"], {
+        stdio: "ignore",
+        detached: true,
+      });
+      trayProcess.unref();
+    }
 
     setTimeout(() => { printMenu(); }, 800);
 
@@ -380,6 +508,7 @@ if (process.argv.includes("--tray")) {
           (async () => {
             await stopTunnel();
             await killServer();
+            killTray();
             console.log("\n  \x1b[90mBye!\x1b[0m\n");
             process.exit(0);
           })();
@@ -398,6 +527,7 @@ if (process.argv.includes("--tray")) {
     cleaning = true;
     await stopTunnel();
     await killServer();
+    killTray();
     console.log("\n  \x1b[90mBye!\x1b[0m\n");
     process.exit(0);
   });
