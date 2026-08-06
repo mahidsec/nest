@@ -11,11 +11,18 @@ export interface Course {
   sortOrder?: number;
 }
 
-export type FileType = 'video' | 'text' | 'code' | 'document' | 'link' | 'image' | 'other';
+export type FileType =
+  | "video"
+  | "text"
+  | "code"
+  | "document"
+  | "link"
+  | "image"
+  | "other";
 
 export interface FileItem {
   name: string;
-  type: FileType | 'folder';
+  type: FileType | "folder";
   path: string;
   size?: number;
   children?: FileItem[];

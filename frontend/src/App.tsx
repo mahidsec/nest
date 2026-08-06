@@ -1298,7 +1298,7 @@ function CourseDetailOverlay({
 
                 return (
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-                    <div className="rounded-xl overflow-hidden bg-black border border-base-300">
+                    <div className="rounded-xl overflow-hidden bg-black border border-base-300 sticky top-0 z-20 md:static">
                       <video
                         key={activeFile.path}
                         src={`${API}/api/courses/${courseId}/file?path=${encodeURIComponent(activeFile.path)}`}
@@ -1332,6 +1332,7 @@ function CourseDetailOverlay({
                           if (nextVideo) {
                             setActiveFile(nextVideo);
                             setFileContent(null);
+                            localStorage.setItem(`nest_last_played_${courseId}`, nextVideo.path);
                           }
                         }}
                       />
@@ -1357,6 +1358,7 @@ function CourseDetailOverlay({
                                 toggleWatch(activeFile.path);
                               setActiveFile(nextVideo);
                               setFileContent(null);
+                              localStorage.setItem(`nest_last_played_${courseId}`, nextVideo.path);
                             }}
                             className="btn btn-sm btn-primary gap-1.5 text-[10px] font-bold uppercase tracking-widest"
                           >
