@@ -143,11 +143,9 @@ export default function AIChat({
         if (saved && ms.some((m: any) => m.id === saved)) {
           setSelectedModel(saved);
         } else {
-          // Default to mimo-2.5-free if available
-          const mimo = ms.find(
-            (m: any) => m.id.startsWith("mimo") || m.id.includes("mimo"),
-          );
-          setSelectedModel(mimo?.id || ms[0]?.id || "");
+          // Default to deepseek if available
+          const ds = ms.find((m: any) => m.id.includes("deepseek"));
+          setSelectedModel(ds?.id || ms[0]?.id || "");
         }
       })
       .catch(() => {})

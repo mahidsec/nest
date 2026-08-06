@@ -344,6 +344,13 @@
   background: rgba(124, 124, 245, 0.1);
   border-radius: 10px;
 }
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
 
 code[class*="language-"],
 pre[class*="language-"] {

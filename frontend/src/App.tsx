@@ -1298,7 +1298,8 @@ function CourseDetailOverlay({
 
                 return (
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-                    <div className="rounded-xl overflow-hidden bg-black border border-base-300 sticky top-0 z-20 md:static">
+                    <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-4 bg-base-200/70 backdrop-blur-md md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:bg-transparent">
+                      <div className="rounded-xl overflow-hidden bg-black border border-base-300">
                       <video
                         key={activeFile.path}
                         src={`${API}/api/courses/${courseId}/file?path=${encodeURIComponent(activeFile.path)}`}
@@ -1338,7 +1339,7 @@ function CourseDetailOverlay({
                       />
                     </div>
                     <div className="mt-4 px-2 flex items-center justify-between">
-                      <div className="text-xl font-bold truncate flex-1 mr-4">
+                      <div className="text-xl font-bold flex-1 mr-4 overflow-x-auto no-scrollbar whitespace-nowrap">
                         {activeFile.name}
                       </div>
                       <div className="flex gap-2 shrink-0">
@@ -1367,61 +1368,61 @@ function CourseDetailOverlay({
                         )}
                       </div>
                     </div>
+                    {/* Mobile toolbar: home, collapse/expand, progress — stays pinned with video */}
+                    <div className="md:hidden mt-3 -mx-4 -mb-4 px-4 pt-3 pb-4 border-t border-base-300 bg-base-200/70 flex items-center justify-between gap-2">
+                      <button
+                        onClick={onClose}
+                        className="btn btn-circle btn-xs btn-ghost text-primary shrink-0"
+                      >
+                        <Home size={18} />
+                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={toggleAll}
+                          className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
+                        >
+                          {isAnyExpanded ? "Collapse All" : "Expand All"}
+                        </button>
+                        <div className="relative w-8 h-8 shrink-0">
+                          <svg
+                            className="w-full h-full -rotate-90"
+                            viewBox="0 0 36 36"
+                          >
+                            <circle
+                              cx="18"
+                              cy="18"
+                              r="15.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              className="text-base-300"
+                            />
+                            <circle
+                              cx="18"
+                              cy="18"
+                              r="15.5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              className="text-primary drop-shadow-sm"
+                              strokeDasharray="97.4"
+                              strokeDashoffset={97.4 - (97.4 * pct) / 100}
+                              strokeLinecap="round"
+                              style={{
+                                transition: "stroke-dashoffset 0.4s ease",
+                              }}
+                            />
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-[8px] font-black text-primary drop-shadow-sm">
+                            {pct}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
 
                     {/* Mobile-only Curriculum Section */}
                     <div className="md:hidden -mx-4 mt-4 border-t border-base-300">
-                      <div className="sticky top-0 z-10 bg-base-200/70 backdrop-blur-md">
-                        <div className="p-3 border-b border-base-300 flex items-center justify-between shadow-sm gap-2">
-                          <button
-                            onClick={onClose}
-                            className="btn btn-circle btn-xs btn-ghost text-primary shrink-0"
-                          >
-                            <Home size={18} />
-                          </button>
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={toggleAll}
-                              className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
-                            >
-                              {isAnyExpanded ? "Collapse All" : "Expand All"}
-                            </button>
-                            <div className="relative w-8 h-8 shrink-0">
-                              <svg
-                                className="w-full h-full -rotate-90"
-                                viewBox="0 0 36 36"
-                              >
-                                <circle
-                                  cx="18"
-                                  cy="18"
-                                  r="15.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.5"
-                                  className="text-base-300"
-                                />
-                                <circle
-                                  cx="18"
-                                  cy="18"
-                                  r="15.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.5"
-                                  className="text-primary drop-shadow-sm"
-                                  strokeDasharray="97.4"
-                                  strokeDashoffset={97.4 - (97.4 * pct) / 100}
-                                  strokeLinecap="round"
-                                  style={{
-                                    transition: "stroke-dashoffset 0.4s ease",
-                                  }}
-                                />
-                              </svg>
-                              <span className="absolute inset-0 flex items-center justify-center text-[8px] font-black text-primary drop-shadow-sm">
-                                {pct}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
                       {loading ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader
