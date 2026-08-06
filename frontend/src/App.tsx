@@ -1298,7 +1298,7 @@ function CourseDetailOverlay({
 
                 return (
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-                    <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-4 bg-base-200/70 backdrop-blur-md md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:bg-transparent">
+                    <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-4 bg-base-200 md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:bg-transparent">
                       <div className="rounded-xl overflow-hidden bg-black border border-base-300">
                       <video
                         key={activeFile.path}
@@ -1369,7 +1369,7 @@ function CourseDetailOverlay({
                       </div>
                     </div>
                     {/* Mobile toolbar: home, collapse/expand, progress — stays pinned with video */}
-                    <div className="md:hidden mt-3 -mx-4 -mb-4 px-4 pt-3 pb-4 border-t border-base-300 bg-base-200/70 flex items-center justify-between gap-2">
+                    <div className="md:hidden mt-3 -mx-4 -mb-4 px-4 pt-3 pb-4 border-t border-base-300 bg-base-200 flex items-center justify-between gap-2">
                       <button
                         onClick={onClose}
                         className="btn btn-circle btn-xs btn-ghost text-primary shrink-0"
