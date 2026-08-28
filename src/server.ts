@@ -860,6 +860,54 @@ The student is currently viewing: ${context}`
   res.end();
 });
 
+// ─── Export / Import Settings ───
+
+app.get("/api/settings/export", async (_req, res) => {
+  try {
+    const courses = await getCourses();
+    const progress = await getCourseProgressData();
+    const bundle = {
+      _nest_backup: true,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      courses,
+      progress,
+    };
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    res.setHeader("Content-Disposition", `attachment; filename="nest-backup-${timestamp}.json"`);
+    res.setHeader("Content-Type", "application/json");
+    res.json(bundle);
+  } catch (err: any) {
+    res.status(500).json({ error: "Export failed: " + err.message });
+  }
+});
+
+app.post("/api/settings/import", async (req, res) => {
+  try {
+    const bundle = req.body;
+    if (!bundle || !bundle._nest_backup) {
+      return res.status(400).json({ error: "Invalid backup file. Not a Nest backup." });
+    }
+    // Validate courses array
+    if (!Array.isArray(bundle.courses)) {
+      return res.status(400).json({ error: "Invalid backup: courses must be an array." });
+    }
+    // Validate progress object
+    if (typeof bundle.progress !== "object" || Array.isArray(bundle.progress)) {
+      return res.status(400).json({ error: "Invalid backup: progress must be an object." });
+    }
+    // Overwrite courses
+    await saveCourses(bundle.courses);
+    // Overwrite progress
+    await saveCourseProgressData(bundle.progress);
+    // Clear video count cache since courses changed
+    videoCountCache.clear();
+    res.json({ success: true, coursesImported: bundle.courses.length });
+  } catch (err: any) {
+    res.status(500).json({ error: "Import failed: " + err.message });
+  }
+});
+
 // ─── SPA fallback ───
 app.get("*", (_req, res) => {
   const indexPath = path.join(publicDir, "index.html");

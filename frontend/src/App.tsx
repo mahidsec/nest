@@ -45,7 +45,8 @@ import {
   Play,
   Bot,
   MessageSquare,
-  GripVertical
+  GripVertical,
+  Upload
 } from "lucide-react";
 import Prism from "prismjs";
 import "prismjs/components/prism-clike";
@@ -2080,6 +2081,87 @@ export default function App() {
     }
   };
 
+  // ─── Export / Import Settings ───
+  const exportSettings = async () => {
+    try {
+      const res = await fetch(`${API}/api/settings/export`);
+      if (!res.ok) throw new Error("Export failed");
+      const bundle = await res.json();
+      // Include client-side localStorage settings
+      bundle.clientSettings = {
+        theme_name: localStorage.getItem("nest_theme_name") || "default",
+        theme_dark: localStorage.getItem("nest_theme_dark") || "true",
+        last_played: {} as Record<string, string>,
+        playback_time: {} as Record<string, string>,
+      };
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (key.startsWith("nest_last_played_")) {
+          bundle.clientSettings.last_played[key] = localStorage.getItem(key) || "";
+        } else if (key.startsWith("nest_playback_time_")) {
+          bundle.clientSettings.playback_time[key] = localStorage.getItem(key) || "";
+        }
+      }
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = bundle._filename || `nest-backup-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export settings.");
+    }
+  };
+
+  const importSettings = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const bundle = JSON.parse(text);
+        if (!bundle._nest_backup) {
+          alert("Invalid backup file.");
+          return;
+        }
+        const res = await fetch(`${API}/api/settings/import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bundle),
+        });
+        const result = await res.json();
+        if (!res.ok) {
+          alert("Import failed: " + result.error);
+          return;
+        }
+        // Restore client-side settings
+        if (bundle.clientSettings) {
+          const cs = bundle.clientSettings;
+          if (cs.theme_name) localStorage.setItem("nest_theme_name", cs.theme_name);
+          if (cs.theme_dark !== undefined) localStorage.setItem("nest_theme_dark", cs.theme_dark);
+          if (cs.last_played) {
+            Object.entries(cs.last_played).forEach(([k, v]) => localStorage.setItem(k, v as string));
+          }
+          if (cs.playback_time) {
+            Object.entries(cs.playback_time).forEach(([k, v]) => localStorage.setItem(k, v as string));
+          }
+        }
+        // Reload to apply everything
+        window.location.reload();
+      } catch (err) {
+        console.error("Import failed:", err);
+        alert("Failed to import settings. Make sure the file is a valid Nest backup.");
+      }
+    };
+    input.click();
+  };
+
   return (
     <div className="min-h-screen bg-base-100">
       {/* Header */}
@@ -2103,6 +2185,23 @@ export default function App() {
                 <Globe2 size={14} /> Tunnel
                 {tunnelStatus.active && <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />}
               </button>
+              <div className="dropdown dropdown-end">
+                <button tabIndex={0} className="btn btn-ghost btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest border border-base-300">
+                  <Download size={14} /> Backup
+                </button>
+                <ul tabIndex={0} className="dropdown-content menu p-2 bg-base-200 border border-base-300 rounded-md shadow-2xl w-44 z-50">
+                  <li>
+                    <button onClick={exportSettings} className="text-xs gap-2">
+                      <Download size={14} /> Export Settings
+                    </button>
+                  </li>
+                  <li>
+                    <button onClick={importSettings} className="text-xs gap-2">
+                      <Upload size={14} /> Import Settings
+                    </button>
+                  </li>
+                </ul>
+              </div>
             </div>
             {/* Mobile: theme + tunnel in one dropdown */}
             <div className="sm:hidden dropdown dropdown-end">
@@ -2118,6 +2217,16 @@ export default function App() {
                 </li>
                 <li className="border-t border-base-300 mt-1 pt-1">
                   <ThemeSwitcher mobile />
+                </li>
+                <li className="border-t border-base-300 mt-1 pt-1">
+                  <button onClick={exportSettings} className="text-xs gap-2">
+                    <Download size={14} /> Export
+                  </button>
+                </li>
+                <li>
+                  <button onClick={importSettings} className="text-xs gap-2">
+                    <Upload size={14} /> Import
+                  </button>
                 </li>
               </ul>
             </div>
