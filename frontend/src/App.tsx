@@ -225,6 +225,24 @@ function countWatched(items: FileItem[], w: Record<string, boolean>): number {
   );
 }
 
+// ─── Global last-played (powers header Resume) ───
+function getLastResume(): { courseId: string; path: string } | null {
+  try {
+    const raw = localStorage.getItem("nest_last_resume");
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (d?.courseId && d?.path) return d;
+  } catch {}
+  return null;
+}
+
+// ponytail: localStorage only; move to server when multi-device resume is wanted.
+function setLastResume(courseId: string, path: string) {
+  localStorage.setItem(`nest_last_played_${courseId}`, path);
+  localStorage.setItem("nest_last_resume", JSON.stringify({ courseId, path }));
+  window.dispatchEvent(new CustomEvent("nest:resume"));
+}
+
 function CourseIcon({
   iconKey,
   size = 20,
@@ -931,7 +949,7 @@ function CourseDetailOverlay({
       setActiveFile(file);
       setFileContent(null);
       if (file.type === "video")
-        localStorage.setItem(`nest_last_played_${courseId}`, file.path);
+        setLastResume(courseId, file.path);
       return;
     }
     if (file.type === "text" || file.type === "code") {
@@ -963,7 +981,7 @@ function CourseDetailOverlay({
     setActiveFile(file);
     setFileContent(null);
     // Save last played
-    localStorage.setItem(`nest_last_played_${courseId}`, file.path);
+    setLastResume(courseId, file.path);
 
     // Auto-expand parent folder of this file and scroll to it
     if (data?.items) {
@@ -1018,7 +1036,7 @@ function CourseDetailOverlay({
     : 0;
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   return (
-    <div className="fixed inset-0 z-[90] bg-base-100 flex flex-col">
+    <div className="fixed inset-0 z-[90] bg-base-100 flex flex-col pt-safe">
       {/* Close Button is inline in sidebar header */}
 
       {/* ─── INFO + CURRICULUM SPLIT (no file selected) ─── */}
@@ -1334,7 +1352,7 @@ function CourseDetailOverlay({
                           if (nextVideo) {
                             setActiveFile(nextVideo);
                             setFileContent(null);
-                            localStorage.setItem(`nest_last_played_${courseId}`, nextVideo.path);
+                            setLastResume(courseId, nextVideo.path);
                           }
                         }}
                       />
@@ -1360,7 +1378,7 @@ function CourseDetailOverlay({
                                 toggleWatch(activeFile.path);
                               setActiveFile(nextVideo);
                               setFileContent(null);
-                              localStorage.setItem(`nest_last_played_${courseId}`, nextVideo.path);
+                              setLastResume(courseId, nextVideo.path);
                             }}
                             className="btn btn-sm btn-primary gap-1.5 text-[10px] font-bold uppercase tracking-widest"
                           >
@@ -2000,6 +2018,26 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // ─── Header Resume: last video played across all courses ───
+  const [resume, setResume] = useState(getLastResume);
+  useEffect(() => {
+    const sync = () => setResume(getLastResume());
+    window.addEventListener("nest:resume", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("nest:resume", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  const resumeCourse = resume ? courses.find((c) => c.id === resume.courseId) : null;
+  const resumeLabel = resume ? resume.path.split("/").pop() : "";
+  const openResume = () => {
+    if (!resume) return;
+    history.pushState({}, "", `/${resume.courseId}?file=${encodeURIComponent(resume.path)}`);
+    setResume(getLastResume());
+    setActiveCourseId(resume.courseId);
+  };
+
   const fetchCourses = useCallback(async () => {
     try {
       const [rCourses, rProgress] = await Promise.all([
@@ -2097,7 +2135,7 @@ export default function App() {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key) continue;
-        if (key.startsWith("nest_last_played_")) {
+        if (key.startsWith("nest_last_played_") || key === "nest_last_resume") {
           bundle.clientSettings.last_played[key] = localStorage.getItem(key) || "";
         } else if (key.startsWith("nest_playback_time_")) {
           bundle.clientSettings.playback_time[key] = localStorage.getItem(key) || "";
@@ -2165,7 +2203,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-base-100">
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-base-100 border-b border-base-300">
+      <div className="sticky top-0 z-40 bg-base-100 border-b border-base-300 pt-safe">
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-lg">🪺</span>
@@ -2230,6 +2268,16 @@ export default function App() {
                 </li>
               </ul>
             </div>
+            {resume && resumeCourse && (
+              <button
+                onClick={openResume}
+                title={`${resumeCourse.name} — ${resumeLabel}`}
+                className="btn btn-primary btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest max-w-[10rem] sm:max-w-xs"
+              >
+                <Play size={14} className="shrink-0" />
+                <span className="truncate">Resume{resumeLabel ? `: ${resumeLabel}` : ""}</span>
+              </button>
+            )}
             <button
               onClick={() => setShowAdd(true)}
               className="btn btn-primary btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest"

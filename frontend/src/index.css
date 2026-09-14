@@ -352,6 +352,11 @@
   display: none;
 }
 
+/* PWA standalone (Add to Home Screen): keep bars below the notch/status area */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 code[class*="language-"],
 pre[class*="language-"] {
   color: var(--color-base-content);

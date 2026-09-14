@@ -51,7 +51,16 @@ const publicDir = path.join(
   "dist",
 );
 if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir, { maxAge: "1h" }));
+  app.use(
+    express.static(publicDir, {
+      maxAge: "1h",
+      setHeaders: (res, p) => {
+        if (p.endsWith("/sw.js")) res.setHeader("Cache-Control", "no-cache");
+        if (p.endsWith(".webmanifest"))
+          res.setHeader("Content-Type", "application/manifest+json");
+      },
+    }),
+  );
 }
 
 // ─── Helpers ───
