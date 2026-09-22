@@ -8,8 +8,47 @@ import "katex/dist/katex.min.css";
 import "highlight.js/styles/atom-one-dark.css";
 import dart from "highlight.js/lib/languages/dart";
 import { Loader, Send, Bot, User, ChevronDown, Plus, Copy, Check } from "lucide-react";
+import { API, api } from "./lib/api";
+import { safeGet, safeSet } from "./lib/storage";
 
-const API = window.location.origin;
+// ─── Single SSE delta parser (was duplicated: streaming loop + flush) ───
+interface Delta { content: string; reasoning: string }
+function parseSSELine(line: string): { done: boolean; delta?: Delta; error?: string } {
+  if (line === "data: [DONE]") return { done: true };
+  if (!line.startsWith("data: ")) return { done: false };
+  let json: { error?: string | { message?: string }; choices?: Array<{ delta?: { content?: string; reasoning?: string } }> };
+  try {
+    json = JSON.parse(line.slice(6));
+  } catch {
+    return { done: false };
+  }
+  if (json?.error) {
+    const e = json.error;
+    return { done: false, error: typeof e === "string" ? e : e.message || "API Error" };
+  }
+  return {
+    done: false,
+    delta: {
+      content: json?.choices?.[0]?.delta?.content || "",
+      reasoning: json?.choices?.[0]?.delta?.reasoning || "",
+    },
+  };
+}
+function applyDelta(setMsgs: React.Dispatch<React.SetStateAction<Message[]>>, d: Delta) {
+  if (!d.content && !d.reasoning) return;
+  setMsgs((prev) => {
+    const copy = [...prev];
+    const last = copy[copy.length - 1];
+    if (last && last.role === "assistant") {
+      copy[copy.length - 1] = {
+        ...last,
+        content: last.content + d.content,
+        reasoning: (last.reasoning || "") + d.reasoning,
+      };
+    }
+    return copy;
+  });
+}
 
 interface Model {
   id: string;
@@ -64,11 +103,12 @@ function MermaidBlock({
     if (isStreaming) return; // Wait until stream finishes to prevent flickering and syntax errors
 
     let isMounted = true;
+    const idRef = `mermaid-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36)}`;
     loadMermaid()
       .then(async () => {
         if (!ref.current) return;
         const mod = await import("mermaid");
-        const id = `mermaid-${Math.random().toString(36).slice(2, 9)}`;
+        const id = idRef;
         const cleanChart = chart.trim();
         try {
           // Remove any stray element from previous failed render
@@ -119,13 +159,16 @@ export default function AIChat({
   onClose?: () => void;
 }) {
   const [models, setModels] = useState<Model[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedModel, setSelectedModel] = useState<string>(() => safeGet("nest_ai_model") || "auto");
+  const [winner, setWinner] = useState<string>(() => safeGet("nest_ai_winner") || "");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(true);
   const chatEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamCtl = useRef<AbortController | null>(null);
+  useEffect(() => () => streamCtl.current?.abort(), []);
 
   const resetChat = () => {
     setMessages([]);
@@ -134,30 +177,28 @@ export default function AIChat({
 
   // Fetch models
   useEffect(() => {
-    fetch(`${API}/api/ai/models`)
-      .then((r) => r.json())
+    const ctl = new AbortController();
+    api<{ data?: Model[] }>("/api/ai/models", { signal: ctl.signal })
       .then((d) => {
         const ms = d?.data || [];
         setModels(ms);
-        const saved = localStorage.getItem("nest_ai_model");
-        if (saved && ms.some((m: any) => m.id === saved)) {
-          setSelectedModel(saved);
-        } else {
-          // Default to deepseek if available
-          const ds = ms.find((m: any) => m.id.includes("deepseek"));
-          setSelectedModel(ds?.id || ms[0]?.id || "");
-        }
+        const saved = safeGet("nest_ai_model") || "auto";
+        setSelectedModel(saved === "auto" || ms.some((m) => m.id === saved) ? saved : "auto");
       })
       .catch(() => {})
-      .finally(() => setModelsLoading(false));
+      .finally(() => {
+        if (!ctl.signal.aborted) setModelsLoading(false);
+      });
+    return () => ctl.abort();
   }, []);
 
-  // Auto-scroll to bottom
+  // Auto-scroll: follow only when already near the bottom
   useEffect(() => {
-    if (messages.length > 0 || streaming) {
-      chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [messages, streaming]);
+    const el = chatEnd.current?.parentElement;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (nearBottom) chatEnd.current?.scrollIntoView({ block: "nearest" });
+  }, [messages]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -189,10 +230,13 @@ export default function AIChat({
       const assistantMsg: Message = { role: "assistant", content: "" };
       setMessages([...currentHistory, assistantMsg]);
 
+      const ctl = new AbortController();
+      streamCtl.current = ctl;
       try {
         const resp = await fetch(`${API}/api/ai/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: ctl.signal,
           body: JSON.stringify({
             model: selectedModel,
             messages: currentHistory,
@@ -203,99 +247,51 @@ export default function AIChat({
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
         }
+        const won = resp.headers.get("X-Nest-Model");
+        if (won) {
+          setWinner(won);
+          safeSet("nest_ai_winner", won);
+        }
 
         const reader = resp.body?.getReader();
         if (!reader) {
-          console.error("[AI Chat] No reader from response body");
-          return;
+          throw new Error("Empty response stream");
         }
         const decoder = new TextDecoder();
         let buffer = "";
-        let done = false;
 
-        while (!done) {
+        for (;;) {
           const { done: d, value } = await reader.read();
-          done = d;
-          if (value) buffer += decoder.decode(value, { stream: !done });
+          if (value) buffer += decoder.decode(value, { stream: !d });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
           for (const line of lines) {
-            if (line.startsWith("data: ") && line !== "data: [DONE]") {
-              let json;
-              try {
-                json = JSON.parse(line.slice(6));
-              } catch (e) {
-                continue;
-              }
-
-              if (json.error) {
-                throw new Error(
-                  typeof json.error === "string"
-                    ? json.error
-                    : json.error.message || "API Error",
-                );
-              }
-
-              const deltaContent = json?.choices?.[0]?.delta?.content || "";
-              const deltaReasoning = json?.choices?.[0]?.delta?.reasoning || "";
-              if (deltaContent || deltaReasoning) {
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  const last = copy[copy.length - 1];
-                  if (last && last.role === "assistant") {
-                    copy[copy.length - 1] = {
-                      ...last,
-                      content: last.content + deltaContent,
-                      reasoning: (last.reasoning || "") + deltaReasoning,
-                    };
-                  }
-                  return copy;
-                });
-              }
+            const r = parseSSELine(line.trim());
+            if (r.done) {
+              if (buffer) buffer = "";
+              break;
             }
+            if (r.error) throw new Error(r.error);
+            if (r.delta) applyDelta(setMessages, r.delta);
           }
+          if (d) break;
+          if (ctl.signal.aborted) break;
         }
-        // flush buffer
-        if (buffer.trim() && !buffer.includes("[DONE]")) {
-          let json;
-          try {
-            json = JSON.parse(buffer.slice(6));
-          } catch (e) {
-            // ignore
-          }
-          if (json && json.error) {
-            throw new Error(
-              typeof json.error === "string"
-                ? json.error
-                : json.error.message || "API Error",
-            );
-          }
-          const deltaContent = json?.choices?.[0]?.delta?.content || "";
-          const deltaReasoning = json?.choices?.[0]?.delta?.reasoning || "";
-          if (deltaContent || deltaReasoning) {
-            setMessages((prev) => {
-              const copy = [...prev];
-              const last = copy[copy.length - 1];
-              if (last && last.role === "assistant") {
-                copy[copy.length - 1] = {
-                  ...last,
-                  content: last.content + deltaContent,
-                  reasoning: (last.reasoning || "") + deltaReasoning,
-                };
-              }
-              return copy;
-            });
-          }
+        if (buffer.trim()) {
+          const r = parseSSELine(buffer.trim());
+          if (r.error) throw new Error(r.error);
+          if (r.delta) applyDelta(setMessages, r.delta);
         }
-      } catch (err: any) {
-        console.error("[AI Chat] Error:", err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        const msg = err instanceof Error ? err.message : "Failed to connect";
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
           if (last && last.role === "assistant") {
             copy[copy.length - 1] = {
               ...last,
-              content: `Error: ${err.message || "Failed to connect"}`,
+              content: `Error: ${msg}`,
               isError: true,
             };
           }
@@ -337,10 +333,11 @@ export default function AIChat({
               value={selectedModel}
               onChange={(e) => {
                 setSelectedModel(e.target.value);
-                localStorage.setItem("nest_ai_model", e.target.value);
+                safeSet("nest_ai_model", e.target.value);
               }}
               className="select select-ghost select-xs text-[10px] font-bold uppercase tracking-widest pr-6 appearance-none bg-transparent bg-none"
             >
+              <option value="auto">Auto{winner ? ` (${winner})` : ""}</option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name || m.id}
@@ -510,7 +507,8 @@ function CopyableCodeBlock({ children }: { children: React.ReactNode }) {
     if (typeof node === "number") return String(node);
     if (Array.isArray(node)) return node.map(getText).join("");
     if (node && typeof node === "object" && "props" in node) {
-      return getText(((node as React.ReactElement).props as any).children);
+      const el = node as { props?: { children?: React.ReactNode } };
+      return getText(el.props?.children);
     }
     return "";
   };
@@ -549,6 +547,7 @@ function MarkdownRenderer({
   // During streaming, skip rehypeKatex so partial $...$ tokens don't cause
   // layout glitches — remarkMath still parses but katex renders after stream ends
   const highlightPlugin = [rehypeHighlight, { languages: { dart } }];
+  // ponytail: any[] — rehype plugin tuples have no shared tuple type; narrow if unified exports Pluggable here.
   const rehypePlugins: any[] = isStreaming
     ? [highlightPlugin]
     : [highlightPlugin, rehypeKatex];

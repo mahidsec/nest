@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import type { FileItem, CourseWithVideos } from "./types";
+import { API, api } from "./lib/api";
+import { safeGet, safeSet, safeParse } from "./lib/storage";
+import {
+  countVideos, countWatched, flattenVideos, findFile, parentChain,
+  getLastResume, setLastResume,
+} from "./lib/tree";
 import QRCode from "qrcode";
 import {
   BookOpen,
@@ -82,41 +89,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import AIChat from "./AIChat";
 
-// ─── Local Type Definitions ───
-type FileType =
-  | "video"
-  | "text"
-  | "code"
-  | "document"
-  | "link"
-  | "image"
-  | "other";
-
-interface FileItem {
-  name: string;
-  type: FileType | "folder";
-  path: string;
-  size?: number;
-  children?: FileItem[];
-  totalVideos?: number;
-}
-
-interface DirectoryScanResult {
-  items: FileItem[];
-  totalVideos: number;
-}
-
-interface CourseWithVideos {
-  id: string;
-  name: string;
-  subtitle: string;
-  localPath: string;
-  icon: string;
-  createdAt: string;
-  totalVideos: number;
-}
-
-const API = window.location.origin;
 const THEME_LIST = [
   { name: "default", label: "Moonlight", icon: "🌑" },
   { name: "sakura", label: "Sakura", icon: "🌸" },
@@ -174,13 +146,13 @@ const COURSE_ICON_LIST = [
 // ─── Theme-aware gradient hook ───
 function useIsDark() {
   const [isDark, setIsDark] = useState(() => {
-    const saved = localStorage.getItem("nest_theme_dark");
+    const saved = safeGet("nest_theme_dark");
     if (saved !== null) return saved === "true";
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
   useEffect(() => {
     const check = () => {
-      const saved = localStorage.getItem("nest_theme_dark");
+      const saved = safeGet("nest_theme_dark");
       if (saved !== null) {
         setIsDark(saved === "true");
         return;
@@ -206,42 +178,6 @@ function useIsDark() {
 }
 
 
-function countVideos(items: FileItem[]): number {
-  return items.reduce(
-    (n, i) =>
-      n +
-      (i.type === "video" ? 1 : 0) +
-      (i.children ? countVideos(i.children) : 0),
-    0,
-  );
-}
-function countWatched(items: FileItem[], w: Record<string, boolean>): number {
-  return items.reduce(
-    (n, i) =>
-      n +
-      (i.type === "video" && w[i.path] ? 1 : 0) +
-      (i.children ? countWatched(i.children, w) : 0),
-    0,
-  );
-}
-
-// ─── Global last-played (powers header Resume) ───
-function getLastResume(): { courseId: string; path: string } | null {
-  try {
-    const raw = localStorage.getItem("nest_last_resume");
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (d?.courseId && d?.path) return d;
-  } catch {}
-  return null;
-}
-
-// ponytail: localStorage only; move to server when multi-device resume is wanted.
-function setLastResume(courseId: string, path: string) {
-  localStorage.setItem(`nest_last_played_${courseId}`, path);
-  localStorage.setItem("nest_last_resume", JSON.stringify({ courseId, path }));
-  window.dispatchEvent(new CustomEvent("nest:resume"));
-}
 
 function CourseIcon({
   iconKey,
@@ -314,7 +250,7 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
     () => localStorage.getItem("nest_theme_name") || "default",
   );
   const [isDark, setIsDark] = useState(() => {
-    const saved = localStorage.getItem("nest_theme_dark");
+    const saved = safeGet("nest_theme_dark");
     if (saved !== null) return saved === "true";
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
@@ -326,13 +262,13 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
 
   const selectTheme = (name: string) => {
     setThemeName(name);
-    localStorage.setItem("nest_theme_name", name);
+    safeSet("nest_theme_name", name);
   };
 
   const toggleDark = () => {
     const newDark = !isDark;
     setIsDark(newDark);
-    localStorage.setItem("nest_theme_dark", String(newDark));
+    safeSet("nest_theme_dark", String(newDark));
   };
 
   // Mobile mode: flat list items inside parent dropdown
@@ -499,18 +435,6 @@ function getAllFolders(items: FileItem[]): string[] {
   return items.filter((i) => i.type === "folder").map((f) => f.name);
 }
 
-function flattenVideos(items: FileItem[]): FileItem[] {
-  const out: FileItem[] = [];
-  for (const item of items) {
-    if (item.type === "folder" && item.children) {
-      out.push(...flattenVideos(item.children));
-    } else if (item.type !== "folder") {
-      out.push(item);
-    }
-  }
-  return out;
-}
-
 function findFolderPath(items: FileItem[], targetPath: string): string | null {
   for (const item of items) {
     if (item.type === "folder" && item.children) {
@@ -582,15 +506,18 @@ function CourseDetailOverlay({
   courseId: string;
   onClose: () => void;
 }) {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<{ items?: FileItem[]; name?: string; icon?: string; subtitle?: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [activeFile, setActiveFile] = useState<any>(null);
-  const [fileContent, setFileContent] = useState<any>(null);
+  const [activeFile, setActiveFile] = useState<FileItem | null>(null);
+  const [fileContent, setFileContent] = useState<{ content?: string; url?: string } | null>(null);
   const [watched, setWatched] = useState<Record<string, boolean>>({});
   const [viewTab, setViewTab] = useState<"preview" | "code">("preview");
   const [showAIChat, setShowAIChat] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const lastSaveRef = useRef(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -600,58 +527,26 @@ function CourseDetailOverlay({
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/api/courses/${courseId}/progress`)
-      .then((r) => r.json())
+    const ctl = new AbortController();
+    api<Record<string, boolean>>(`/api/courses/${courseId}/progress`, { signal: ctl.signal })
       .then((d) => setWatched(d || {}))
       .catch(() => {});
-    fetch(`${API}/api/courses/${courseId}/browse`)
-      .then((r) => r.json())
+    api<{ items?: FileItem[] }>(`/api/courses/${courseId}/browse`, { signal: ctl.signal })
       .then((d) => {
+        if (ctl.signal.aborted) return;
         setData(d);
         setLoading(false);
 
         // Restore file from URL ?file= param (deep-link / reload / back-button)
         const urlFile = new URLSearchParams(location.search).get("file");
 
-        // Find the file and its parent chain to expand
-        const findParentChain = (
-          nodes: FileItem[],
-          targetPath: string,
-          chain: string[] = [],
-        ): string[] | null => {
-          for (const n of nodes) {
-            if (n.path === targetPath) return chain;
-            if (n.children) {
-              const result = findParentChain(n.children, targetPath, [
-                ...chain,
-                n.path,
-              ]);
-              if (result) return result;
-            }
-          }
-          return null;
-        };
-        const findFile = (
-          nodes: FileItem[],
-          path: string,
-        ): FileItem | undefined => {
-          for (const n of nodes) {
-            if (n.path === path) return n;
-            if (n.children) {
-              const f = findFile(n.children, path);
-              if (f) return f;
-            }
-          }
-          return undefined;
-        };
-
         const restorePath =
-          urlFile || localStorage.getItem(`nest_last_played_${courseId}`);
+          urlFile || safeGet(`nest_last_played_${courseId}`);
         if (restorePath && d?.items) {
-          const parentChain = findParentChain(d.items, restorePath);
+          const chain = parentChain(d.items, restorePath);
           const initExp: Record<string, boolean> = {};
-          if (parentChain)
-            parentChain.forEach((p) => {
+          if (chain)
+            chain.forEach((p) => {
               initExp[p] = true;
             });
           setExpanded(initExp);
@@ -668,18 +563,11 @@ function CourseDetailOverlay({
           setExpanded(initExp);
         }
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        if (!ctl.signal.aborted) setLoading(false);
+      });
+    return () => ctl.abort();
   }, [courseId]);
-
-  useEffect(() => {
-    if (
-      activeFile &&
-      (activeFile.type === "code" || activeFile.type === "text") &&
-      fileContent
-    ) {
-      requestAnimationFrame(() => Prism.highlightAll());
-    }
-  }, [activeFile, fileContent]);
 
   const toggleExpand = (path: string) => {
     setExpanded((p) => ({ ...p, [path]: !p[path] }));
@@ -916,14 +804,13 @@ function CourseDetailOverlay({
       return next;
     });
     try {
-      const r = await fetch(`${API}/api/courses/${courseId}/progress`, {
+      const d = await api<Record<string, boolean>>(`/api/courses/${courseId}/progress`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filePath: fp, watched: newVal }),
       });
-      const d = await r.json();
       setWatched(d);
-    } catch {}
+    } catch { /* optimistic state already set */ }
   };
 
   const openFile = async (file: FileItem) => {
@@ -956,10 +843,11 @@ function CourseDetailOverlay({
       setActiveFile(file);
       setViewTab("preview");
       try {
-        const r = await fetch(
-          `${API}/api/courses/${courseId}/file?path=${encodeURIComponent(file.path)}`,
+        setFileContent(
+          await api<{ content: string; url: string }>(
+            `/api/courses/${courseId}/file?path=${encodeURIComponent(file.path)}`,
+          ),
         );
-        setFileContent(await r.json());
       } catch {
         setFileContent({ content: "Failed to load file" });
       }
@@ -968,11 +856,11 @@ function CourseDetailOverlay({
     if (file.type === "link") {
       setActiveFile(file);
       try {
-        const r = await fetch(
-          `${API}/api/courses/${courseId}/file?path=${encodeURIComponent(file.path)}`,
+        setFileContent(
+          await api<{ content: string; url: string }>(
+            `/api/courses/${courseId}/file?path=${encodeURIComponent(file.path)}`,
+          ),
         );
-        const d = await r.json();
-        setFileContent(d);
       } catch {
         setFileContent({ url: "" });
       }
@@ -985,28 +873,11 @@ function CourseDetailOverlay({
 
     // Auto-expand parent folder of this file and scroll to it
     if (data?.items) {
-      const findParentChain = (
-        nodes: FileItem[],
-        targetPath: string,
-        chain: string[] = [],
-      ): string[] | null => {
-        for (const n of nodes) {
-          if (n.path === targetPath) return chain;
-          if (n.children) {
-            const result = findParentChain(n.children, targetPath, [
-              ...chain,
-              n.path,
-            ]);
-            if (result) return chain.concat(n.path);
-          }
-        }
-        return null;
-      };
-      const parentChain = findParentChain(data.items, file.path);
-      if (parentChain) {
+      const chain = parentChain(data.items, file.path);
+      if (chain) {
         setExpanded((p) => {
           const next = { ...p };
-          parentChain.forEach((pg) => {
+          chain.forEach((pg) => {
             next[pg] = true;
           });
           return next;
@@ -1027,14 +898,15 @@ function CourseDetailOverlay({
     });
   };
 
-  const items = data?.items || [];
-  const totalV = data?.items ? countVideos(data.items) : 0;
-  const watchedV = data?.items ? countWatched(data.items, watched) : 0;
+  const items = useMemo(() => data?.items || [], [data]);
+  const totalV = useMemo(() => countVideos(items), [items]);
+  const watchedV = useMemo(() => countWatched(items, watched), [items, watched]);
   const pct = totalV > 0 ? Math.round((watchedV / totalV) * 100) : 0;
-  const totalSections = data?.items
-    ? data.items.filter((i: FileItem) => i.type === "folder").length
-    : 0;
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const allVideos = useMemo(() => flattenVideos(items), [items]);
+  const totalSections = useMemo(
+    () => items.filter((i: FileItem) => i.type === "folder").length,
+    [items],
+  );
   return (
     <div className="fixed inset-0 z-[90] bg-base-100 flex flex-col pt-safe">
       {/* Close Button is inline in sidebar header */}
@@ -1055,7 +927,7 @@ function CourseDetailOverlay({
               <div className="flex items-center gap-3 md:flex-col md:gap-0 mb-2 md:mb-6">
                 <div className="p-1.5 md:p-5 rounded-2xl bg-primary">
                   <CourseIcon
-                    iconKey={data.icon}
+                    iconKey={data.icon || "BookOpen"}
                     size={24}
                     className="text-primary-content drop-shadow-lg md:w-12 md:h-12"
                   />
@@ -1123,17 +995,10 @@ function CourseDetailOverlay({
                 </div>
                 <div className="flex items-center gap-3">
                   {(() => {
-                    const lastPath = localStorage.getItem(`nest_last_played_${courseId}`);
+                    const lastPath = safeGet(`nest_last_played_${courseId}`);
                     if (!lastPath) return null;
-                    const findFile = (nodes: FileItem[]): FileItem | null => {
-                      for (const n of nodes) {
-                        if (n.path === lastPath && n.type === "video") return n;
-                        if (n.children) { const f = findFile(n.children); if (f) return f; }
-                      }
-                      return null;
-                    };
-                    const lastFile = findFile(items);
-                    if (!lastFile) return null;
+                    const lastFile = findFile(items, lastPath);
+                    if (!lastFile || lastFile.type !== "video") return null;
                     return (
                       <button
                         onClick={() => openFile(lastFile)}
@@ -1298,52 +1163,42 @@ function CourseDetailOverlay({
           <div className="flex-1 flex flex-col bg-base-300/10 overflow-y-auto">
             {activeFile.type === "video" &&
               (() => {
-                const flattenVideos = (nodes: FileItem[]): FileItem[] => {
-                  let v: FileItem[] = [];
-                  for (const n of nodes) {
-                    if (n.type === "video") v.push(n);
-                    if (n.children) v = v.concat(flattenVideos(n.children));
-                  }
-                  return v;
-                };
-                const allVideos = flattenVideos(items);
-                const curIdx = allVideos.findIndex(
-                  (v: FileItem) => v.path === activeFile.path,
-                );
+                const videosOnly = allVideos.filter((v) => v.type === "video");
+                const curIdx = videosOnly.findIndex((v) => v.path === activeFile.path);
                 const nextVideo =
-                  curIdx >= 0 && curIdx < allVideos.length - 1
-                    ? allVideos[curIdx + 1]
-                    : null;
-
+                  curIdx >= 0 && curIdx < videosOnly.length - 1 ? videosOnly[curIdx + 1] : null;
                 return (
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
                     <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-4 bg-base-200 md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:bg-transparent">
-                      <div className="rounded-xl overflow-hidden bg-black border border-base-300">
+                      <div className="relative rounded-xl overflow-hidden bg-black border border-base-300">
                       <video
                         key={activeFile.path}
+                        ref={videoRef}
                         src={`${API}/api/courses/${courseId}/file?path=${encodeURIComponent(activeFile.path)}`}
                         controls
                         autoPlay
                         playsInline
+                        disablePictureInPicture={false}
                         className="w-full aspect-video"
                         onTimeUpdate={(e) => {
-                          const v = e.currentTarget;
                           const now = Date.now();
-                          if (!(v as any).__lastSave || now - (v as any).__lastSave > 5000) {
-                            (v as any).__lastSave = now;
-                            localStorage.setItem(
+                          if (now - lastSaveRef.current > 5000) {
+                            lastSaveRef.current = now;
+                            safeSet(
                               `nest_playback_time_${courseId}`,
-                              JSON.stringify({ path: activeFile.path, time: v.currentTime }),
+                              JSON.stringify({ path: activeFile.path, time: e.currentTarget.currentTime }),
                             );
                           }
                         }}
                         onLoadedMetadata={(e) => {
-                          const saved = localStorage.getItem(`nest_playback_time_${courseId}`);
-                          if (saved) {
-                            const { path, time } = JSON.parse(saved);
-                            if (path === activeFile.path && time > 0) {
-                              e.currentTarget.currentTime = time;
-                            }
+                          const saved = safeParse<{ path?: string; time?: number }>(
+                            safeGet(`nest_playback_time_${courseId}`),
+                            {},
+                          );
+                          if (saved.path === activeFile.path && (saved.time || 0) > 0) {
+                            try {
+                              e.currentTarget.currentTime = saved.time as number;
+                            } catch { /* seek past duration: ignore */ }
                           }
                         }}
                         onEnded={() => {
@@ -1517,7 +1372,7 @@ function CourseDetailOverlay({
                           <div className="flex-1 overflow-auto bg-base-100 p-0 custom-scrollbar">
                             <table className="table table-xs w-full bg-base-100 border-collapse">
                               {(() => {
-                                const rows = parseCSV(fileContent.content);
+                                const rows = parseCSV(fileContent.content || "");
                                 if (rows.length === 0) return null;
                                 const header = rows[0];
                                 const body = rows.slice(1);
@@ -1713,9 +1568,11 @@ function CourseDetailOverlay({
 function TunnelQR({ url }: { url: string }) {
   const [src, setSrc] = useState("");
   useEffect(() => {
-    QRCode.toDataURL(url, { width: 200, margin: 2, errorCorrectionLevel: "L" }, (err: any, dataUrl: string) => {
-      if (!err) setSrc(dataUrl);
-    });
+    let live = true;
+    QRCode.toDataURL(url, { width: 200, margin: 2, errorCorrectionLevel: "L" })
+      .then((dataUrl) => { if (live) setSrc(dataUrl); })
+      .catch(() => {});
+    return () => { live = false; };
   }, [url]);
   if (!src) return null;
   return <img src={src} alt="Tunnel QR" className="rounded-lg border border-base-300" width={200} height={200} />;
@@ -1735,20 +1592,20 @@ function TunnelModal({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${API}/api/tunnel`)
-      .then((r) => r.json())
-      .then(setStatus)
+    let live = true;
+    api<{ active: boolean; url: string | null }>("/api/tunnel")
+      .then((d) => { if (live) setStatus(d); })
       .catch(() => {});
+    return () => { live = false; };
   }, []);
 
   const startTunnel = async () => {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(`${API}/api/tunnel/start`, { method: "POST" });
-      const d = await r.json();
+      const d = await api<{ success: boolean; url?: string; error?: string }>("/api/tunnel/start", { method: "POST" });
       if (d.success) {
-        setStatus({ active: true, url: d.url });
+        setStatus({ active: true, url: d.url || null });
       } else {
         setError(d.error || "Failed to start tunnel");
       }
@@ -1761,9 +1618,9 @@ function TunnelModal({
   const stopTunnel = async () => {
     setLoading(true);
     try {
-      await fetch(`${API}/api/tunnel/stop`, { method: "POST" });
+      await api("/api/tunnel/stop", { method: "POST" });
       setStatus({ active: false, url: null });
-    } catch {}
+    } catch { /* already stopped */ }
     setLoading(false);
   };
 
@@ -1876,7 +1733,7 @@ function AddCourseModal({
     setSaving(true);
     setError("");
     try {
-      const r = await fetch(`${API}/api/courses`, {
+      const d = await api<{ success: boolean; error?: string }>("/api/courses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1886,7 +1743,6 @@ function AddCourseModal({
           subtitle: subtitle.trim(),
         }),
       });
-      const d = await r.json();
       if (d.success) {
         onAdded();
         onClose();
@@ -1999,7 +1855,8 @@ function AddCourseModal({
 
 // ─── Main App ───
 export default function App() {
-  const [courses, setCourses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<CourseWithVideos[]>([]);
+  const [banner, setBanner] = useState("");
   const [globalProgress, setGlobalProgress] = useState<Record<string, number>>({});
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null);
@@ -2012,8 +1869,7 @@ export default function App() {
 
   // Poll tunnel status on mount
   useEffect(() => {
-    fetch(`${API}/api/tunnel`)
-      .then((r) => r.json())
+    api<{ active: boolean; url: string | null }>("/api/tunnel")
       .then((d) => setTunnelStatus(d))
       .catch(() => {});
   }, []);
@@ -2040,13 +1896,13 @@ export default function App() {
 
   const fetchCourses = useCallback(async () => {
     try {
-      const [rCourses, rProgress] = await Promise.all([
-        fetch(`${API}/api/courses`),
-        fetch(`${API}/api/courses/progress`)
+      const [c, g] = await Promise.all([
+        api<CourseWithVideos[]>("/api/courses"),
+        api<Record<string, number>>("/api/courses/progress"),
       ]);
-      setCourses(await rCourses.json());
-      setGlobalProgress(await rProgress.json());
-    } catch {}
+      setCourses(c);
+      setGlobalProgress(g);
+    } catch { /* offline: keep stale list */ }
     setLoadingCourses(false);
   }, []);
 
@@ -2089,7 +1945,9 @@ export default function App() {
 
   const deleteCourse = async (id: string) => {
     if (!confirm("Remove this course?")) return;
-    await fetch(`${API}/api/courses/${id}`, { method: "DELETE" });
+    try {
+      await api(`/api/courses/${id}`, { method: "DELETE" });
+    } catch { /* fall through to refresh */ }
     fetchCourses();
   };
 
@@ -2109,10 +1967,10 @@ export default function App() {
         const oldIndex = items.findIndex((i) => i.id === active.id);
         const newIndex = items.findIndex((i) => i.id === over.id);
         const newArray = arrayMove(items, oldIndex, newIndex);
-        fetch(`${API}/api/courses/reorder`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderedIds: newArray.map(c => c.id) })
+        api("/api/courses/reorder", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderedIds: newArray.map((c) => c.id) }),
         }).catch(() => {});
         return newArray;
       });
@@ -2122,35 +1980,34 @@ export default function App() {
   // ─── Export / Import Settings ───
   const exportSettings = async () => {
     try {
-      const res = await fetch(`${API}/api/settings/export`);
-      if (!res.ok) throw new Error("Export failed");
-      const bundle = await res.json();
+      const bundle = await api<Record<string, any>>("/api/settings/export");
       // Include client-side localStorage settings
-      bundle.clientSettings = {
-        theme_name: localStorage.getItem("nest_theme_name") || "default",
-        theme_dark: localStorage.getItem("nest_theme_dark") || "true",
+      const clientSettings: Record<string, any> = {
+        theme_name: safeGet("nest_theme_name") || "default",
+        theme_dark: safeGet("nest_theme_dark") || "true",
         last_played: {} as Record<string, string>,
         playback_time: {} as Record<string, string>,
       };
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key) continue;
-        if (key.startsWith("nest_last_played_") || key === "nest_last_resume") {
-          bundle.clientSettings.last_played[key] = localStorage.getItem(key) || "";
-        } else if (key.startsWith("nest_playback_time_")) {
-          bundle.clientSettings.playback_time[key] = localStorage.getItem(key) || "";
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (!key) continue;
+          if (key.startsWith("nest_last_played_") || key === "nest_last_resume") {
+            clientSettings.last_played[key] = safeGet(key) || "";
+          } else if (key.startsWith("nest_playback_time_")) {
+            clientSettings.playback_time[key] = safeGet(key) || "";
+          }
         }
-      }
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      } catch { /* storage blocked */ }
+      const blob = new Blob([JSON.stringify({ ...bundle, clientSettings }, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = bundle._filename || `nest-backup-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`;
+      a.download = `nest-backup-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Export failed:", err);
-      alert("Failed to export settings.");
+    } catch {
+      setBanner("Failed to export settings.");
     }
   };
 
@@ -2163,38 +2020,32 @@ export default function App() {
       if (!file) return;
       try {
         const text = await file.text();
-        const bundle = JSON.parse(text);
+        const bundle = safeParse<Record<string, any>>(text, {});
         if (!bundle._nest_backup) {
-          alert("Invalid backup file.");
+          setBanner("Invalid backup file.");
           return;
         }
-        const res = await fetch(`${API}/api/settings/import`, {
+        await api("/api/settings/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(bundle),
         });
-        const result = await res.json();
-        if (!res.ok) {
-          alert("Import failed: " + result.error);
-          return;
-        }
         // Restore client-side settings
         if (bundle.clientSettings) {
           const cs = bundle.clientSettings;
-          if (cs.theme_name) localStorage.setItem("nest_theme_name", cs.theme_name);
-          if (cs.theme_dark !== undefined) localStorage.setItem("nest_theme_dark", cs.theme_dark);
+          if (cs.theme_name) safeSet("nest_theme_name", cs.theme_name);
+          if (cs.theme_dark !== undefined) safeSet("nest_theme_dark", cs.theme_dark);
           if (cs.last_played) {
-            Object.entries(cs.last_played).forEach(([k, v]) => localStorage.setItem(k, v as string));
+            Object.entries(cs.last_played).forEach(([k, v]) => { if (typeof v === "string") safeSet(k, v); });
           }
           if (cs.playback_time) {
-            Object.entries(cs.playback_time).forEach(([k, v]) => localStorage.setItem(k, v as string));
+            Object.entries(cs.playback_time).forEach(([k, v]) => { if (typeof v === "string") safeSet(k, v); });
           }
         }
         // Reload to apply everything
         window.location.reload();
-      } catch (err) {
-        console.error("Import failed:", err);
-        alert("Failed to import settings. Make sure the file is a valid Nest backup.");
+      } catch (e) {
+        setBanner(e instanceof Error ? `Import failed: ${e.message}` : "Failed to import settings.");
       }
     };
     input.click();
@@ -2288,6 +2139,17 @@ export default function App() {
         </div>
       </div>
 
+      {banner && (
+        <div className="px-4 pt-3 max-w-4xl mx-auto">
+          <div className="text-[11px] font-bold text-error bg-error/10 border border-error/30 rounded-md px-3 py-2 flex items-center justify-between gap-3">
+            <span>{banner}</span>
+            <button onClick={() => setBanner("")} className="btn btn-ghost btn-xs btn-square shrink-0" aria-label="Dismiss">
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Course Grid */}
       <div className="p-4 max-w-4xl mx-auto">
         {loadingCourses ? (
@@ -2362,8 +2224,7 @@ export default function App() {
         <TunnelModal onClose={() => {
           setShowTunnel(false);
           // Refresh tunnel status when modal closes
-          fetch(`${API}/api/tunnel`)
-            .then((r) => r.json())
+          api<{ active: boolean; url: string | null }>("/api/tunnel")
             .then((d) => setTunnelStatus(d))
             .catch(() => {});
         }} />

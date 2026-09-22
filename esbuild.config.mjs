@@ -8,5 +8,5 @@ await build({
   outdir: 'dist',
   packages: 'external',
   banner: { js: '#!/usr/bin/env node' },
-  target: 'node22',
+  target: 'node18',
 });

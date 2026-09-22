@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "cd frontend && npm run build && cd .. && node esbuild.config.mjs",
+    "test": "node node_modules/tsx/dist/cli.mjs --test tests/",
     "dev:server": "tsx src/server.ts",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "npm run dev:server",

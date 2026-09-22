@@ -19,8 +19,15 @@ const progressPath = join(dataDir, "course_progress.json");
 if (!existsSync(coursesPath)) writeFileSync(coursesPath, "[]");
 if (!existsSync(progressPath)) writeFileSync(progressPath, "{}");
 
-const VERSION = "1.1.0";
-const PORT = Number(process.env.PORT) || 6969;
+let VERSION = "1.1.0";
+try {
+  VERSION = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version || VERSION;
+} catch { /* dist layout: keep fallback */ }
+const PORT = (() => {
+  const n = Number(process.env.PORT);
+  return Number.isFinite(n) && n > 0 && n < 65536 ? n : 6969;
+})();
+
 
 let serverProcess = null;
 let tunnelProcess = null;
@@ -29,23 +36,37 @@ let trayProcess = null;
 
 // ─── System tray singleton ───
 const TRAY_PID_PATH = join(homedir(), ".nest", "tray.pid");
+const TRAY_READY_MS = 12000;
+let traySignalsArmed = false;
 
+const readTrayPid = () => {
+  try {
+    const pid = Number(readFileSync(TRAY_PID_PATH, "utf8").trim());
+    return pid > 0 ? pid : -1;
+  } catch { return -1; }
+};
+
+// Only unlink a lock we own — never steal another instance's lock.
 function removeTrayLock() {
-  try { unlinkSync(TRAY_PID_PATH); } catch {}
+  try {
+    if (readTrayPid() !== process.pid) return;
+    unlinkSync(TRAY_PID_PATH);
+  } catch {}
 }
 
 function isTrayRunning() {
-  try {
-    const pid = Number(readFileSync(TRAY_PID_PATH, "utf8").trim());
-    if (pid <= 0) return false;
-    try { process.kill(pid, 0); } catch { return false; }
-    if (platform === "linux") {
-      try {
-        if (!readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("--tray")) return false;
-      } catch { return false; }
-    }
-    return true;
-  } catch { return false; }
+  const pid = readTrayPid();
+  if (pid <= 0) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); } catch { return false; }
+  if (platform() === "linux") {
+    // Guard against PID reuse: the lock must point at a --tray process.
+    // (platform is the os.platform function — comparing it to a string was dead code.)
+    try {
+      if (!readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("--tray")) return false;
+    } catch { return false; }
+  }
+  return true;
 }
 
 function killTray() {
@@ -55,6 +76,59 @@ function killTray() {
     if (pid > 0) { try { process.kill(pid, "SIGTERM"); } catch {} }
   } catch {}
   trayProcess = null;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let activeTray = null;
+let trayExiting = false;
+
+// SIGTERM/SIGINT must take the native tray child down with us — otherwise it
+// keeps running orphaned (ghost icon that never responds to clicks).
+async function exitTraySupervisor() {
+  if (trayExiting) return;
+  trayExiting = true;
+  const t = activeTray;
+  activeTray = null;
+  if (t) {
+    try { await Promise.race([t.kill(false), sleep(3000)]); } catch {}
+  }
+  process.exit(0);
+}
+
+// Supervisor: keeps the icon alive. The native tray child drops silently when
+// the StatusNotifier host restarts (Waybar/Hyprland reload, sleep/wake), so
+// park on its exit and reclaim the lock instead of lingering iconless.
+async function runTraySupervisor() {
+  let failures = 0;
+  for (;;) {
+    if (isTrayRunning()) process.exit(0);
+    let tray = null;
+    try {
+      tray = await startTray();
+    } catch {
+      tray = null;
+    }
+    if (!tray) {
+      failures++;
+      await sleep(Math.min(1000 * 2 ** Math.min(failures, 4), 15000));
+      continue;
+    }
+    failures = 0;
+    activeTray = tray;
+    await new Promise((resolve) => {
+      try {
+        const p = tray.process;
+        if (!p || p.exitCode !== null || p.signalCode) return resolve();
+        tray.onExit(resolve);
+        tray.onError(resolve);
+      } catch { resolve(); }
+    });
+    activeTray = null;
+    if (trayExiting) return;
+    removeTrayLock();
+    await sleep(1000);
+  }
 }
 
 // ─── Autostart on login ───
@@ -213,10 +287,14 @@ function printMenu() {
 }
 
 function killPort(port) {
-  const cmds = [
-    `lsof -ti:${port} 2>/dev/null`,
-    `fuser ${port}/tcp 2>/dev/null | tr -s ' '`,
-  ];
+  // Guard: lsof/fuser absent on Windows/minimal installs — skip silently
+  const cmds =
+    process.platform === "win32"
+      ? [`netstat -ano | findstr :${port}`]
+      : [
+          `lsof -ti:${port} 2>/dev/null`,
+          `fuser ${port}/tcp 2>/dev/null | tr -s ' '`,
+        ];
   for (const cmd of cmds) {
     try {
       const out = execSync(cmd).toString().trim();
@@ -349,7 +427,7 @@ async function startTray() {
 
     if (!existsSync(iconPath)) {
       console.log("  \x1b[33m\u26A0\x1b[0m icon.png not found at " + iconPath);
-      return;
+      process.exit(0); // fatal for this process; supervisor must not spin on it
     }
 
     const iconData = readFileSync(iconPath).toString("base64");
@@ -390,17 +468,38 @@ async function startTray() {
       }
     });
 
-    await systray.ready();
-    writeFileSync(TRAY_PID_PATH, String(process.pid));
-    process.on("exit", removeTrayLock);
-    process.on("SIGTERM", () => process.exit(0));
-    process.on("SIGINT", () => process.exit(0));
+    let readyTimer;
+    try {
+      // ready() hangs forever with no tray host (e.g. autostart before Waybar)
+      await Promise.race([
+        systray.ready(),
+        new Promise((_, rej) => { readyTimer = setTimeout(() => rej(new Error("tray ready timeout")), TRAY_READY_MS); }),
+      ]);
+    } catch (e) {
+      try { systray.process?.kill("SIGKILL"); } catch {}
+      throw e;
+    } finally {
+      clearTimeout(readyTimer);
+    }
+    try {
+      writeFileSync(TRAY_PID_PATH, String(process.pid), { flag: "wx" });
+    } catch {
+      // Lost the claim race, or a stale lock survived: re-check before overwriting.
+      if (isTrayRunning()) throw new Error("another tray instance claimed the lock");
+      writeFileSync(TRAY_PID_PATH, String(process.pid));
+    }
+    if (!traySignalsArmed) {
+      traySignalsArmed = true;
+      process.on("exit", removeTrayLock);
+      process.on("SIGTERM", () => { exitTraySupervisor().catch(() => process.exit(0)); });
+      process.on("SIGINT", () => { exitTraySupervisor().catch(() => process.exit(0)); });
+    }
     console.log("  \x1b[32m\u2713\x1b[0m System tray active");
     return systray;
   } catch (err) {
     console.log("  \x1b[33m\u26A0\x1b[0m Tray unavailable (" + (err.message || err) + ")");
     console.log("  \x1b[90mServer running in background. Stop with: kill $(lsof -ti:" + PORT + ")\x1b[0m");
-    return null;
+    throw err; // transient: let the supervisor back off and retry
   }
 }
 
@@ -455,16 +554,14 @@ async function handleSelect() {
 
 // ─── If --tray flag, just run tray ───
 if (process.argv.includes("--tray")) {
-  if (isTrayRunning()) process.exit(0);
-  startTray().then((t) => { if (!t) process.exit(0); });
-  setInterval(() => {}, 1000 * 60 * 60);
+  runTraySupervisor();
 } else {
   // ─── If --auto flag, start silently (used by autostart) ───
   if (process.argv.includes("--auto")) {
     startServer();
     if (serverProcess) serverProcess.unref();
     if (!isTrayRunning()) {
-      const t = spawn("node", [__filename, "--tray"], { stdio: "ignore", detached: true });
+      const t = spawn(process.execPath, [__filename, "--tray"], { stdio: "ignore", detached: true });
       t.unref();
     }
     process.exit(0);
@@ -481,7 +578,7 @@ if (process.argv.includes("--tray")) {
 
     // Tray icon visible as soon as the TUI starts (single instance)
     if (!isTrayRunning()) {
-      trayProcess = spawn("node", [__filename, "--tray"], {
+      trayProcess = spawn(process.execPath, [__filename, "--tray"], {
         stdio: "ignore",
         detached: true,
       });
@@ -520,15 +617,23 @@ if (process.argv.includes("--tray")) {
     process.exit(0);
   }
 
+  const restoreStdin = () => {
+    try {
+      if (process.stdin.isTTY && process.stdin.isRaw) process.stdin.setRawMode(false);
+    } catch {}
+    try { process.stdin.pause(); } catch {}
+  };
   // SIGINT handler — in raw mode, the stdin handler above catches Ctrl+C.
   // This is a safety net for edge cases (e.g. SIGINT from another process).
   process.on("SIGINT", async () => {
     if (cleaning) return;
     cleaning = true;
+    restoreStdin();
     await stopTunnel();
     await killServer();
     killTray();
     console.log("\n  \x1b[90mBye!\x1b[0m\n");
     process.exit(0);
   });
+  process.on("exit", restoreStdin);
 }

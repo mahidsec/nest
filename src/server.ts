@@ -5,27 +5,42 @@ import fs from "fs";
 import { readFile, writeFile, readdir, stat, rename } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
-import { spawn, execSync } from "child_process";
-import { homedir, platform, arch } from "os";
-import { COURSES_PATH, COURSE_PROGRESS_PATH, DATA_DIR } from "./config.js";
+import { spawn } from "child_process";
+import { homedir } from "os";
+import { COURSES_PATH, COURSE_PROGRESS_PATH } from "./config.js";
 import type {
   Course,
   CourseWithVideos,
-  FileType,
   FileItem,
   DirectoryScanResult,
 } from "./types.js";
+import {
+  VALID_ICONS,
+  HIDDEN_EXTS,
+  VIDEO_EXTS,
+  MIME_MAP,
+  JSON_LIMIT,
+  TEXT_FILE_CAP,
+  AI_TIMEOUT_MS,
+  TUNNEL_WAIT_MS,
+  VIDEO_COUNT_TTL,
+  VIDEO_COUNT_MAX,
+  fileKind,
+} from "./constants.js";
+import { zenId, zenHeaders, buildChatBody } from "./zen.js";
 
 const app = express();
 const httpServer = createServer(app);
 
-const PORT = Number(process.env.PORT) || 6969;
-const IS_TUNNEL = process.env.NEST_TUNNEL === "true";
+const PORT = (() => {
+  const n = Number(process.env.PORT);
+  return Number.isFinite(n) && n > 0 && n < 65536 ? n : 6969;
+})();
 
-// ─── CORS: localhost only + tunnel support ───
+// ─── CORS: intentionally open — LAN devices + Cloudflare tunnel need it ───
 app.use(cors());
 
-app.use(express.json());
+app.use(express.json({ limit: JSON_LIMIT }));
 
 // ─── Security headers ───
 app.use((_req, res, next) => {
@@ -65,26 +80,7 @@ if (fs.existsSync(publicDir)) {
 
 // ─── Helpers ───
 
-const VALID_ICONS = [
-  "Zap",
-  "Music",
-  "Languages",
-  "BookOpen",
-  "DollarSign",
-  "Code",
-  "Paintbrush",
-  "Microscope",
-  "BarChart3",
-  "Dumbbell",
-  "Camera",
-  "Gamepad2",
-  "Brain",
-  "Scale",
-  "HeartPulse",
-  "Wrench",
-  "GraduationCap",
-  "Briefcase",
-];
+const VALID_ICON_LIST = [...VALID_ICONS];
 
 const getCourses = async (): Promise<Course[]> => {
   try {
@@ -119,66 +115,11 @@ const saveCourses = async (courses: Course[]): Promise<void> => {
 const naturalCompare = (a: string, b: string): number =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-const HIDDEN_EXTS = [".srt", ".sub", ".ass", ".ssa", ".idx", ".vtt"];
+const HIDDEN_CHECK = (filename: string): boolean =>
+  HIDDEN_EXTS.has(path.extname(filename).toLowerCase());
 
-const isHiddenMediaSub = (filename: string): boolean =>
-  HIDDEN_EXTS.includes(path.extname(filename).toLowerCase());
-
-const getFileType = (filename: string): FileType => {
-  const ext = path.extname(filename).toLowerCase();
-  const videoExts = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"];
-  const imageExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"];
-  const codeExts = [
-    ".js",
-    ".ts",
-    ".py",
-    ".java",
-    ".c",
-    ".cpp",
-    ".h",
-    ".cs",
-    ".go",
-    ".rs",
-    ".rb",
-    ".php",
-    ".swift",
-    ".kt",
-    ".html",
-    ".css",
-    ".scss",
-    ".json",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".sh",
-    ".bash",
-    ".sql",
-    ".r",
-    ".jsx",
-    ".tsx",
-    ".vue",
-    ".svelte",
-  ];
-  const docExts = [
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    ".odt",
-  ];
-  const textExts = [".txt", ".md", ".rtf", ".log", ".csv"];
-  const linkExts = [".url", ".webloc", ".desktop", ".lnk"];
-  if (videoExts.includes(ext)) return "video";
-  if (imageExts.includes(ext)) return "image";
-  if (codeExts.includes(ext)) return "code";
-  if (docExts.includes(ext)) return "document";
-  if (textExts.includes(ext)) return "text";
-  if (linkExts.includes(ext)) return "link";
-  return "other";
-};
+const getFileType = (filename: string) =>
+  fileKind(path.extname(filename).toLowerCase());
 
 const scanDirectory = async (
   dirPath: string,
@@ -190,28 +131,32 @@ const scanDirectory = async (
 
   for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
-    const fullPath = path.join(dirPath, entry.name);
-    const relPath = path.relative(relativeTo, fullPath);
+    try {
+      const fullPath = path.join(dirPath, entry.name);
+      const relPath = path.relative(relativeTo, fullPath);
 
-    if (entry.isDirectory()) {
-      const children = await scanDirectory(fullPath, relativeTo);
-      folders.push({
-        name: entry.name,
-        type: "folder",
-        path: relPath,
-        children: children.items,
-        totalVideos: children.totalVideos,
-      });
-    } else {
-      if (isHiddenMediaSub(entry.name)) continue;
-      const fileType = getFileType(entry.name);
-      const s = await stat(fullPath);
-      files.push({
-        name: entry.name,
-        type: fileType,
-        path: relPath,
-        size: s.size,
-      });
+      if (entry.isDirectory()) {
+        const children = await scanDirectory(fullPath, relativeTo);
+        folders.push({
+          name: entry.name,
+          type: "folder",
+          path: relPath,
+          children: children.items,
+          totalVideos: children.totalVideos,
+        });
+      } else {
+        if (HIDDEN_CHECK(entry.name)) continue;
+        const st = await stat(fullPath).catch(() => null);
+        if (!st || (!st.isFile() && !st.isSymbolicLink())) continue;
+        files.push({
+          name: entry.name,
+          type: getFileType(entry.name),
+          path: relPath,
+          size: st.size,
+        });
+      }
+    } catch {
+      continue; // one bad entry must not fail the whole course
     }
   }
 
@@ -226,27 +171,32 @@ const scanDirectory = async (
   return { items, totalVideos };
 };
 
-const countVideoFiles = async (dirPath: string): Promise<number> => {
+const countVideoFiles = async (dirPath: string, depth = 0): Promise<number> => {
+  if (depth > 32) return 0; // symlink-loop ceiling
+  let entries;
   try {
-    await stat(dirPath);
+    entries = await readdir(dirPath, { withFileTypes: true });
   } catch {
     return 0;
   }
   let count = 0;
-  const videoExts = [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"];
-  try {
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    const promises: Promise<number>[] = [];
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      if (entry.isDirectory())
-        promises.push(countVideoFiles(path.join(dirPath, entry.name)));
-      else if (videoExts.includes(path.extname(entry.name).toLowerCase()))
-        count++;
+  const subdirs: string[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    try {
+      if (entry.isDirectory()) subdirs.push(path.join(dirPath, entry.name));
+      else if (VIDEO_EXTS.has(path.extname(entry.name).toLowerCase())) count++;
+    } catch {
+      continue;
     }
-    const results = await Promise.all(promises);
-    count += results.reduce((a, b) => a + b, 0);
-  } catch {}
+  }
+  // Bounded concurrency: 8 dirs at a time (FD ceiling on big courses)
+  for (let i = 0; i < subdirs.length; i += 8) {
+    const batch = await Promise.all(
+      subdirs.slice(i, i + 8).map((d) => countVideoFiles(d, depth + 1)),
+    );
+    for (const n of batch) count += n;
+  }
   return count;
 };
 
@@ -255,8 +205,8 @@ const videoCountCache = new Map<
   string,
   { count: number; ts: number; updating?: boolean }
 >();
-const CACHE_TTL = 30_000;
-const CACHE_MAX = 200;
+const CACHE_TTL = VIDEO_COUNT_TTL;
+const CACHE_MAX = VIDEO_COUNT_MAX;
 
 const triggerVideoCountUpdate = async (course: Course) => {
   const dirPath = course.localPath;
@@ -284,7 +234,7 @@ const triggerVideoCountUpdate = async (course: Course) => {
         await saveCourses(allCourses);
       }
     }
-  } catch (err) {
+  } catch {
     if (cached) cached.updating = false;
   }
 };
@@ -335,38 +285,29 @@ let tunnelPublicUrl: string | null = null;
 const NEST_BIN_DIR = path.join(homedir(), ".nest", "bin");
 const CLOUDFLARED_PATH = path.join(NEST_BIN_DIR, "cloudflared");
 
-function getCloudflaredDownloadUrl(): string {
-  const p = platform();
-  const a = arch();
-  const osMap: Record<string, string> = { linux: "linux", darwin: "darwin" };
-  const archMap: Record<string, string> = { x64: "amd64", arm64: "arm64" };
-  return `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-${osMap[p] || p}-${archMap[a] || a}`;
-}
-
+let cloudflaredBin: string | null | undefined;
 function findCloudflared(): string | null {
-  // 1. Check system PATH
-  try {
-    const result = execSync(
-      "which cloudflared 2>/dev/null || command -v cloudflared 2>/dev/null",
-    )
-      .toString()
-      .trim();
-    if (result && fs.existsSync(result)) return result;
-  } catch {}
-  // 2. Check ~/.nest/bin/cloudflared
-  if (fs.existsSync(CLOUDFLARED_PATH)) return CLOUDFLARED_PATH;
-  try {
-    if (!fs.existsSync(NEST_BIN_DIR))
-      fs.mkdirSync(NEST_BIN_DIR, { recursive: true });
-    execSync(
-      `curl -fSL -o "${CLOUDFLARED_PATH}" "${getCloudflaredDownloadUrl()}"`,
-      { stdio: "inherit" },
-    );
-    fs.chmodSync(CLOUDFLARED_PATH, 0o755);
-    return CLOUDFLARED_PATH;
-  } catch {
-    return null;
+  if (cloudflaredBin !== undefined) return cloudflaredBin;
+  // 1. System PATH (non-blocking: PATH scan instead of execSync)
+  const pathDirs = (process.env.PATH || "").split(path.delimiter);
+  for (const dir of pathDirs) {
+    try {
+      const cand = path.join(dir, "cloudflared");
+      if (cand && fs.existsSync(cand)) {
+        cloudflaredBin = cand;
+        return cand;
+      }
+    } catch {
+      continue;
+    }
   }
+  // 2. ~/.nest/bin/cloudflared (CLI installs it on demand)
+  if (fs.existsSync(CLOUDFLARED_PATH)) {
+    cloudflaredBin = CLOUDFLARED_PATH;
+    return CLOUDFLARED_PATH;
+  }
+  cloudflaredBin = null;
+  return null;
 }
 
 app.get("/api/tunnel", (_req, res) => {
@@ -376,7 +317,7 @@ app.get("/api/tunnel", (_req, res) => {
   });
 });
 
-app.post("/api/tunnel/start", async (_req, res) => {
+app.post("/api/tunnel/start", async (req, res) => {
   if (tunnelChild) {
     return res.json({ success: true, url: tunnelPublicUrl });
   }
@@ -384,8 +325,7 @@ app.post("/api/tunnel/start", async (_req, res) => {
   const bin = findCloudflared();
   if (!bin) {
     return res.status(400).json({
-      error:
-        "cloudflared not found. Run `cloudflared tunnel --url http://localhost:${PORT}` manually or install from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-local-tunnel/",
+      error: `cloudflared not found. Start the Nest CLI once (it auto-installs cloudflared) or run \`cloudflared tunnel --url http://localhost:${PORT}\` manually.`,
     });
   }
 
@@ -422,20 +362,22 @@ app.post("/api/tunnel/start", async (_req, res) => {
     tunnelPublicUrl = null;
   });
 
-  // Wait up to 15s for URL
+  // Wait for URL (cleanup timers if the client disconnects)
   const tunnelUrl = await new Promise<string | null>((resolve) => {
     if (tunnelPublicUrl) return resolve(tunnelPublicUrl);
-    const timer = setTimeout(() => {
+    let done = false;
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       clearInterval(interval);
-      resolve(null);
-    }, 15000);
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), TUNNEL_WAIT_MS);
     const interval = setInterval(() => {
-      if (tunnelPublicUrl) {
-        clearTimeout(timer);
-        clearInterval(interval);
-        resolve(tunnelPublicUrl);
-      }
+      if (tunnelPublicUrl) finish(tunnelPublicUrl);
     }, 200);
+    req.on("close", () => finish(tunnelPublicUrl));
   });
 
   if (tunnelUrl) {
@@ -478,10 +420,10 @@ app.post("/api/courses", async (req, res) => {
     return res.status(400).json({ error: "Name and localPath are required" });
 
   // Validate icon
-  if (icon && !VALID_ICONS.includes(icon)) {
+  if (icon && !VALID_ICONS.has(icon)) {
     return res
       .status(400)
-      .json({ error: `Invalid icon. Valid icons: ${VALID_ICONS.join(", ")}` });
+      .json({ error: `Invalid icon. Valid icons: ${VALID_ICON_LIST.join(", ")}` });
   }
 
   // Validate subtitle length
@@ -614,7 +556,12 @@ app.get("/api/courses/:id/file", async (req, res) => {
     const ext = path.extname(realResolved).toLowerCase();
     const fileType = getFileType(path.basename(realResolved));
 
+    if (fileStat.isDirectory())
+      return res.status(400).json({ error: "Path is a directory" });
+
     if (fileType === "text" || fileType === "code") {
+      if (fileStat.size > TEXT_FILE_CAP)
+        return res.status(413).json({ error: "File too large to preview inline" });
       const content = await readFile(realResolved, "utf-8");
       return res.json({
         type: fileType,
@@ -638,26 +585,7 @@ app.get("/api/courses/:id/file", async (req, res) => {
       }
     }
 
-    const mimeMap: Record<string, string> = {
-      ".mp4": "video/mp4",
-      ".mkv": "video/x-matroska",
-      ".avi": "video/x-msvideo",
-      ".mov": "video/quicktime",
-      ".webm": "video/webm",
-      ".m4v": "video/mp4",
-      ".jpg": "image/jpeg",
-      ".jpeg": "image/jpeg",
-      ".png": "image/png",
-      ".gif": "image/gif",
-      ".webp": "image/webp",
-      ".bmp": "image/bmp",
-      ".svg": "image/svg+xml",
-      ".pdf": "application/pdf",
-      ".doc": "application/msword",
-      ".docx":
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    };
-    const contentType = mimeMap[ext] || "application/octet-stream";
+    const contentType = MIME_MAP[ext] || "application/octet-stream";
 
     const safePipe = (stream: fs.ReadStream, response: typeof res) => {
       stream.on("error", () => {
@@ -726,28 +654,60 @@ app.put("/api/courses/:id/progress", async (req, res) => {
   res.json(all[courseId]);
 });
 
+// ─── Zen (OpenCode) request shape — mirrors 9router's bundled opencode adapter ───
+// Free tier 403s (FreeTierError) unless the request looks like the official
+// agentic client: versioned UA, canonical ses_/msg_ IDs, the {bash,glob,grep,
+// read} tool quartet, stream:true. Adapted from 9router PR #4132.
+// ponytail: muse-spark models prefer /zen/v1/responses (different body/SSE shape);
+// staying on chat/completions so the relay parser below keeps working — upgrade
+// to a responses-shape translator if muse-spark support is ever needed.
+const ZEN_CHAT_URL = "https://opencode.ai/zen/v1/chat/completions";
+const ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models";
+let autoWinner: string | null = null;
+const zenFreeModels = async (signal: AbortSignal): Promise<string[]> => {
+  const r = await fetch(ZEN_MODELS_URL, { signal });
+  if (!r.ok) return [];
+  const d = (await r.json()) as { data?: Array<{ id?: string }> };
+  return (d?.data || [])
+    .map((m) => m.id || "")
+    .filter((id) => id && (id.endsWith("-free") || id === "big-pickle"));
+};
+
 // ─── AI Chat Proxy (free models, no API key) ───
 
 app.get("/api/ai/models", async (_req, res) => {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), AI_TIMEOUT_MS);
   try {
-    const resp = await fetch("https://opencode.ai/zen/v1/models");
+    const resp = await fetch("https://opencode.ai/zen/v1/models", {
+      signal: ctl.signal,
+    });
     if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
-    const data = (await resp.json()) as any;
+    const data = (await resp.json()) as {
+      data?: Array<{ id?: string; name?: string }>;
+    };
     const models = (data?.data || []).filter(
-      (m: any) => m.id?.endsWith("-free") || m.id === "big-pickle",
+      (m) => m.id?.endsWith("-free") || m.id === "big-pickle",
     );
     res.json({ data: models });
-  } catch (err: any) {
-    res
-      .status(502)
-      .json({ error: "Failed to fetch models", detail: err.message });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    res.status(502).json({ error: "Failed to fetch models", detail: msg.slice(0, 200) });
+  } finally {
+    clearTimeout(timer);
   }
 });
 
 app.post("/api/ai/chat", async (req, res) => {
-  const { model, messages, context } = req.body;
-  if (!model || !messages)
+  const { model, messages, context } = req.body as {
+    model?: unknown;
+    messages?: unknown;
+    context?: unknown;
+  };
+  if (typeof model !== "string" || !model || !Array.isArray(messages))
     return res.status(400).json({ error: "model and messages required" });
+  if (typeof context !== "undefined" && typeof context !== "string")
+    return res.status(400).json({ error: "context must be a string" });
 
   const systemMsg = {
     role: "system" as const,
@@ -755,8 +715,8 @@ app.post("/api/ai/chat", async (req, res) => {
       `You are the user's best buddy — the one friend who somehow knows everything and explains it in a way that just clicks. You're built into the Nest learning platform, and your job is to make learning feel like a conversation with a smart friend, not a lecture.
 
 Your AI identity:
-- Your model identifier is: ${model}
-- If a student asks what model you are, what AI you are, or who made you, answer honestly: you are the "${model}" language model, served through Nest's AI tutor feature.
+- Your model identifier is: ${model === "auto" ? "Nest Auto" : model}
+- If a student asks what model you are, what AI you are, or who made you, answer honestly: you are the "${model === "auto" ? "Nest Auto" : model}" language model, served through Nest's AI tutor feature.
 - Do not claim to be GPT, Claude, Gemini, or any other named model unless your model ID clearly indicates so.
 
 Identity & Style:
@@ -803,35 +763,70 @@ The student is currently viewing: ${context}`
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
+  // Flushed after the upstream pick so X-Nest-Model can ride along.
 
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), AI_TIMEOUT_MS);
+  // req emits "close" once its body is consumed — abort only if the SSE
+  // response itself drops mid-flight (client navigated away / cancelled).
+  res.on("close", () => {
+    if (!res.writableEnded) ctl.abort();
+  });
   try {
-    const upstream = await fetch(
-      "https://opencode.ai/zen/v1/chat/completions",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [systemMsg, ...messages],
-          stream: true,
-        }),
-      },
+    // Auto: winner first, then free models in order; explicit model: one shot.
+    const free =
+      model === "auto"
+        ? await zenFreeModels(ctl.signal).catch((e: unknown) => {
+            if (e instanceof Error && e.name === "AbortError") throw e;
+            return [] as string[];
+          })
+        : [];
+    const candidates = (model === "auto" ? [autoWinner, ...free] : [model]).filter(
+      (m, i, a): m is string => !!m && a.indexOf(m) === i,
     );
-
-    if (!upstream.ok) {
-      const errText = await upstream.text();
+    let upstream: Response | null = null;
+    let usedModel = model === "auto" ? "" : model;
+    let lastErr = "";
+    for (const m of candidates.length ? candidates : [model]) {
+      try {
+        const session = zenId("ses_");
+        const chatBody = buildChatBody(m, systemMsg, messages);
+        const r = await fetch(ZEN_CHAT_URL, {
+          method: "POST",
+          headers: zenHeaders(session),
+          signal: ctl.signal,
+          body: JSON.stringify(chatBody),
+        });
+        if (r.ok) {
+          upstream = r;
+          usedModel = m;
+          break;
+        }
+        lastErr = `Upstream error ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`;
+      } catch (e) {
+        const aborted = e instanceof Error && e.name === "AbortError";
+        lastErr =
+          e instanceof Error
+            ? aborted
+              ? "Request timed out, please retry"
+              : e.message.slice(0, 300)
+            : "Chat failed";
+        if (aborted) break;
+      }
+    }
+    if (model === "auto" && usedModel) autoWinner = usedModel;
+    if (!upstream) {
       res.write(
         "data: " +
-          JSON.stringify({
-            error: "Upstream error " + upstream.status + ": " + errText,
-          }) +
+          JSON.stringify({ error: lastErr || "No model responded" }) +
           "\n\n",
       );
       res.write("data: [DONE]\n\n");
       res.end();
       return;
     }
+    if (usedModel) res.setHeader("X-Nest-Model", usedModel);
+    res.flushHeaders();
 
     const reader = upstream.body?.getReader();
     const decoder = new TextDecoder();
@@ -857,14 +852,19 @@ The student is currently viewing: ${context}`
     // flush remaining
     if (buffer.trim()) res.write(buffer + "\n\n");
     res.write("data: [DONE]\n\n");
-  } catch (err: any) {
-    console.error(
-      "[AI Chat] Catch error:",
-      err.message,
-      err.stack?.substring(0, 200),
-    );
-    res.write("data: " + JSON.stringify({ error: err.message }) + "\n\n");
-    res.write("data: [DONE]\n\n");
+  } catch (err) {
+    if (!res.writableEnded) {
+      const msg =
+        err instanceof Error
+          ? err.name === "AbortError"
+            ? "Request timed out, please retry"
+            : err.message.slice(0, 300)
+          : "Chat failed";
+      res.write("data: " + JSON.stringify({ error: msg }) + "\n\n");
+      res.write("data: [DONE]\n\n");
+    }
+  } finally {
+    clearTimeout(timer);
   }
   res.end();
 });
@@ -886,8 +886,9 @@ app.get("/api/settings/export", async (_req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="nest-backup-${timestamp}.json"`);
     res.setHeader("Content-Type", "application/json");
     res.json(bundle);
-  } catch (err: any) {
-    res.status(500).json({ error: "Export failed: " + err.message });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    res.status(500).json({ error: "Export failed: " + msg.slice(0, 200) });
   }
 });
 
@@ -905,17 +906,69 @@ app.post("/api/settings/import", async (req, res) => {
     if (typeof bundle.progress !== "object" || Array.isArray(bundle.progress)) {
       return res.status(400).json({ error: "Invalid backup: progress must be an object." });
     }
-    // Overwrite courses
-    await saveCourses(bundle.courses);
-    // Overwrite progress
-    await saveCourseProgressData(bundle.progress);
-    // Clear video count cache since courses changed
+    const cleanCourses: Course[] = [];
+    for (const c of bundle.courses) {
+      if (
+        !c ||
+        typeof c.id !== "string" ||
+        typeof c.name !== "string" ||
+        typeof c.localPath !== "string"
+      ) {
+        return res.status(400).json({ error: "Invalid backup: bad course entry." });
+      }
+      const st = await stat(path.resolve(c.localPath)).catch(() => null);
+      if (!st || !st.isDirectory()) {
+        return res
+          .status(400)
+          .json({ error: `Invalid backup: missing directory for "${c.name}".` });
+      }
+      cleanCourses.push({
+        id: c.id,
+        name: c.name.slice(0, 200),
+        subtitle: typeof c.subtitle === "string" ? c.subtitle.slice(0, 200) : "",
+        localPath: path.resolve(c.localPath),
+        icon: typeof c.icon === "string" && VALID_ICONS.has(c.icon) ? c.icon : "BookOpen",
+        createdAt: typeof c.createdAt === "string" ? c.createdAt : new Date().toISOString(),
+        sortOrder: typeof c.sortOrder === "number" ? c.sortOrder : cleanCourses.length,
+      });
+    }
+    const cleanProgress: Record<string, Record<string, boolean>> = {};
+    for (const [cid, files] of Object.entries(bundle.progress as Record<string, unknown>)) {
+      if (!files || typeof files !== "object" || Array.isArray(files)) continue;
+      cleanProgress[cid] = {};
+      for (const [fp, v] of Object.entries(files as Record<string, unknown>)) {
+        if (v === true && typeof fp === "string" && fp.length < 1024)
+          cleanProgress[cid][fp] = true;
+      }
+    }
+    await saveCourses(cleanCourses);
+    await saveCourseProgressData(cleanProgress);
     videoCountCache.clear();
-    res.json({ success: true, coursesImported: bundle.courses.length });
-  } catch (err: any) {
-    res.status(500).json({ error: "Import failed: " + err.message });
+    res.json({ success: true, coursesImported: cleanCourses.length });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown error";
+    res.status(500).json({ error: "Import failed: " + msg.slice(0, 200) });
   }
 });
+
+// ─── API 404 (JSON, not the SPA shell) ───
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+// ─── Central error handler (JSON envelope, no HTML leaks) ───
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use(
+  (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    const msg = err instanceof Error ? err.message : "Internal error";
+    res.status(500).json({ error: msg.slice(0, 200) });
+  },
+);
 
 // ─── SPA fallback ───
 app.get("*", (_req, res) => {
