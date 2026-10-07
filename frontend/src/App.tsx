@@ -4,7 +4,8 @@ import { API, api } from "./lib/api";
 import { safeGet, safeSet, safeParse } from "./lib/storage";
 import {
   countVideos, countWatched, flattenVideos, findFile, parentChain,
-  getLastResume, setLastResume,
+  getLastResume, setLastResume, syncResumeFromServer,
+  getLocalTheme, applyTheme, setThemeState, syncThemeFromServer,
 } from "./lib/tree";
 import QRCode from "qrcode";
 import {
@@ -26,6 +27,7 @@ import {
   Wrench,
   GraduationCap,
   Briefcase,
+  Sparkles,
   FolderOpen,
   FileVideo,
   FileText,
@@ -89,7 +91,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import AIChat from "./AIChat";
 
-const THEME_LIST = [
+// Fallback when /api/settings/theme is unreachable — mirrors backend THEMES.
+const FALLBACK_THEMES = [
   { name: "default", label: "Moonlight", icon: "🌑" },
   { name: "sakura", label: "Sakura", icon: "🌸" },
   { name: "matcha", label: "Matcha", icon: "🍵" },
@@ -120,6 +123,7 @@ const COURSE_ICON_MAP: Record<
   Wrench,
   GraduationCap,
   Briefcase,
+  Sparkles,
 };
 
 const COURSE_ICON_LIST = [
@@ -141,6 +145,7 @@ const COURSE_ICON_LIST = [
   { key: "Wrench", label: "Engineering" },
   { key: "GraduationCap", label: "Academic" },
   { key: "Briefcase", label: "Business" },
+  { key: "Sparkles", label: "AI" },
 ];
 
 // ─── Theme-aware gradient hook ───
@@ -244,31 +249,63 @@ const parseCSV = (str: string) => {
   return result;
 };
 
-// ─── Theme Switcher ───
+// ─── Theme Switcher (server-persistent: same theme on every device) ───
+// Theme list itself comes from the server (single source in backend
+// constants); the bundled fallback only renders when offline at first load.
+function useThemeList() {
+  const [list, setList] = useState(FALLBACK_THEMES);
+  useEffect(() => {
+    let live = true;
+    api<{ themes?: Array<{ name: string; label: string; icon: string }> }>("/api/settings/theme")
+      .then((d) => {
+        if (live && Array.isArray(d?.themes) && d.themes.length > 0) setList(d.themes);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return list;
+}
 function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
-  const [themeName, setThemeName] = useState(
-    () => localStorage.getItem("nest_theme_name") || "default",
-  );
-  const [isDark, setIsDark] = useState(() => {
-    const saved = safeGet("nest_theme_dark");
-    if (saved !== null) return saved === "true";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  });
+  const themeList = useThemeList();
+  const [themeName, setThemeName] = useState(() => getLocalTheme().name);
+  const [isDark, setIsDark] = useState(() => getLocalTheme().dark);
+
+  // Sync from server on mount + live cross-tab/device updates
+  useEffect(() => {
+    syncThemeFromServer()
+      .then((t) => {
+        if (t) {
+          setThemeName(t.name);
+          setIsDark(t.dark);
+        }
+      })
+      .catch(() => {});
+    const sync = () => {
+      const t = getLocalTheme();
+      setThemeName(t.name);
+      setIsDark(t.dark);
+    };
+    window.addEventListener("nest:theme", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("nest:theme", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
 
   useEffect(() => {
-    const fullTheme = `${themeName}-${isDark ? "dark" : "light"}`;
-    document.documentElement.setAttribute("data-theme", fullTheme);
+    applyTheme({ name: themeName, dark: isDark });
   }, [themeName, isDark]);
 
   const selectTheme = (name: string) => {
     setThemeName(name);
-    safeSet("nest_theme_name", name);
+    setThemeState({ name, dark: isDark });
   };
 
   const toggleDark = () => {
     const newDark = !isDark;
     setIsDark(newDark);
-    safeSet("nest_theme_dark", String(newDark));
+    setThemeState({ name: themeName, dark: newDark });
   };
 
   // Mobile mode: flat list items inside parent dropdown
@@ -278,7 +315,7 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
         <button onClick={toggleDark} className="text-xs gap-2">
           {isDark ? "🌙" : "☀️"} {isDark ? "Dark Mode" : "Light Mode"}
         </button>
-        {THEME_LIST.map((t) => (
+        {themeList.map((t) => (
           <button
             key={t.name}
             onClick={() => selectTheme(t.name)}
@@ -319,7 +356,7 @@ function ThemeSwitcher({ mobile }: { mobile?: boolean }) {
             />
           </button>
         </li>
-        {THEME_LIST.map((t) => (
+        {themeList.map((t) => (
           <li key={t.name}>
             <button
               onClick={() => selectTheme(t.name)}
@@ -515,9 +552,42 @@ function CourseDetailOverlay({
   const [viewTab, setViewTab] = useState<"preview" | "code">("preview");
   const [showAIChat, setShowAIChat] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [lastPlayedPath, setLastPlayedPath] = useState<string | null>(() => safeGet(`nest_last_played_${courseId}`));
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const lastSaveRef = useRef(0);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Track change: scroll preview to top + reload persistent player.
+  // The <video> element is NOT keyed by path so fullscreen survives auto-next.
+  useEffect(() => {
+    previewRef.current?.scrollTo({ top: 0 });
+    if (activeFile?.type === "video" && videoRef.current) {
+      try {
+        videoRef.current.load();
+        videoRef.current.play()?.catch(() => {});
+      } catch { /* autoplay blocked: user presses play */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile?.path]);
+
+  // Server is the single source of truth for resume — sync on open + live updates
+  useEffect(() => {
+    let cancelled = false;
+    syncResumeFromServer()
+      .then(() => {
+        if (!cancelled) setLastPlayedPath(safeGet(`nest_last_played_${courseId}`));
+      })
+      .catch(() => {});
+    const sync = () => setLastPlayedPath(safeGet(`nest_last_played_${courseId}`));
+    window.addEventListener("nest:resume", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("nest:resume", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, [courseId]);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -532,7 +602,7 @@ function CourseDetailOverlay({
       .then((d) => setWatched(d || {}))
       .catch(() => {});
     api<{ items?: FileItem[] }>(`/api/courses/${courseId}/browse`, { signal: ctl.signal })
-      .then((d) => {
+      .then(async (d) => {
         if (ctl.signal.aborted) return;
         setData(d);
         setLoading(false);
@@ -540,6 +610,12 @@ function CourseDetailOverlay({
         // Restore file from URL ?file= param (deep-link / reload / back-button)
         const urlFile = new URLSearchParams(location.search).get("file");
 
+        // Server holds the shared resume — wait for it so restore uses cross-device truth
+        try {
+          await syncResumeFromServer();
+        } catch { /* offline: fall back to local cache */ }
+        if (ctl.signal.aborted) return;
+        setLastPlayedPath(safeGet(`nest_last_played_${courseId}`));
         const restorePath =
           urlFile || safeGet(`nest_last_played_${courseId}`);
         if (restorePath && d?.items) {
@@ -602,7 +678,7 @@ function CourseDetailOverlay({
       const hasChildren = item.children && item.children.length > 0;
       const isExpandedFolder = item.type === "folder" && isExp && hasChildren;
 
-      const renderSnakeLines = (isWatched = false) => {
+      const renderSnakeLines = (isWatched = false, showDot = true) => {
         // Top Half Line (0% to 50%)
         const topHalf =
           level > 0 && isFirst ? (
@@ -689,7 +765,9 @@ function CourseDetailOverlay({
           >
             {topHalf}
             {bottomHalf}
-            {/* Dot marker at center of item on the line */}
+            {/* Dot marker at center of item on the line (folders skip it —
+                the chevron sits there instead, no backdrop behind it) */}
+            {showDot && (
             <div
               className="absolute pointer-events-none"
               style={{
@@ -717,6 +795,7 @@ function CourseDetailOverlay({
                 />
               </div>
             </div>
+            )}
           </div>
         );
       };
@@ -733,10 +812,10 @@ function CourseDetailOverlay({
               className={`group relative flex items-center gap-3 w-full text-left py-3 pr-4 hover:bg-base-200 transition-colors ${level === 0 ? "bg-base-200/30" : ""}`}
               style={{ paddingLeft: `${(level + 1) * 1}rem`, zIndex: 1 }}
             >
-              {renderSnakeLines()}
+              {renderSnakeLines(false, false)}
               <ChevronRight
                 size={14}
-                className={`transition-transform duration-200 ${isExp ? "rotate-90" : ""} opacity-50 shrink-0 relative z-10 bg-base-100 rounded-full`}
+                className={`transition-transform duration-200 ${isExp ? "rotate-90" : ""} opacity-50 shrink-0 relative z-10`}
               />
               <FolderOpen
                 size={16}
@@ -770,7 +849,7 @@ function CourseDetailOverlay({
             {renderSnakeLines(!!watched[item.path])}
             <FIcon
               size={14}
-              className={`${item.type === "video" ? "text-primary" : "opacity-40"} shrink-0 relative z-10 bg-base-100 rounded-full`}
+              className={`${item.type === "video" ? "text-primary" : "opacity-40"} shrink-0 relative z-10`}
             />
             <div
               className={`flex-1 min-w-0 text-xs truncate relative z-10 ${isActive ? "font-bold" : ""}`}
@@ -909,14 +988,23 @@ function CourseDetailOverlay({
   );
   return (
     <div className="fixed inset-0 z-[90] bg-base-100 flex flex-col pt-safe">
-      {/* Close Button is inline in sidebar header */}
+      {/* Floating back to courses (file view has its own back controls) */}
+      {!activeFile && (
+        <button
+          onClick={onClose}
+          className="btn btn-circle btn-sm btn-ghost absolute top-2 left-2 md:top-4 md:left-4 z-30 bg-base-100/70 backdrop-blur-md border border-base-300/60"
+          aria-label="Back to courses"
+        >
+          <ArrowLeft size={18} />
+        </button>
+      )}
 
       {/* ─── INFO + CURRICULUM SPLIT (no file selected) ─── */}
       {!activeFile && data && (
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* Left: Course Info Panel */}
           <div
-            className="w-full md:w-2/5 lg:w-1/3 bg-base-200 flex flex-col md:items-center md:justify-center p-2 md:p-12 relative overflow-hidden border-b md:border-b-0 md:border-r border-base-300/30"
+            className="w-full md:w-2/5 lg:w-1/3 bg-base-200 flex flex-col md:items-center md:justify-center py-2 pl-12 pr-2 md:p-12 relative overflow-hidden border-b md:border-b-0 md:border-r border-base-300/30"
           >
             {/* Decorative background glow */}
             <div className="absolute inset-0 opacity-20 pointer-events-none">
@@ -995,7 +1083,7 @@ function CourseDetailOverlay({
                 </div>
                 <div className="flex items-center gap-3">
                   {(() => {
-                    const lastPath = safeGet(`nest_last_played_${courseId}`);
+                    const lastPath = lastPlayedPath;
                     if (!lastPath) return null;
                     const lastFile = findFile(items, lastPath);
                     if (!lastFile || lastFile.type !== "video") return null;
@@ -1010,9 +1098,9 @@ function CourseDetailOverlay({
                   })()}
                   <button
                     onClick={toggleAll}
-                    className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
+                    className="text-[11px] font-semibold text-primary hover:underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer whitespace-nowrap"
                   >
-                    {isAnyExpanded ? "Collapse All" : "Expand All"}
+                    {isAnyExpanded ? "Collapse all" : "Expand all"}
                   </button>
                   <div className="relative w-8 h-8 shrink-0">
                     <svg
@@ -1090,9 +1178,9 @@ function CourseDetailOverlay({
                 <div className="flex items-center gap-3 ml-auto">
                   <button
                     onClick={toggleAll}
-                    className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
+                    className="text-[11px] font-semibold text-primary hover:underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer whitespace-nowrap"
                   >
-                    {isAnyExpanded ? "Collapse All" : "Expand All"}
+                    {isAnyExpanded ? "Collapse all" : "Expand all"}
                   </button>
                   <div className="relative w-8 h-8 shrink-0">
                     <svg
@@ -1160,7 +1248,7 @@ function CourseDetailOverlay({
           </button>
 
           {/* File / Video Preview Area */}
-          <div className="flex-1 flex flex-col bg-base-300/10 overflow-y-auto">
+          <div ref={previewRef} className="flex-1 flex flex-col bg-base-300/10 overflow-y-auto">
             {activeFile.type === "video" &&
               (() => {
                 const videosOnly = allVideos.filter((v) => v.type === "video");
@@ -1169,10 +1257,31 @@ function CourseDetailOverlay({
                   curIdx >= 0 && curIdx < videosOnly.length - 1 ? videosOnly[curIdx + 1] : null;
                 return (
                   <div className="flex flex-col w-full max-w-5xl mx-auto p-4 md:p-6 lg:p-8">
-                    <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-4 bg-base-200 md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:bg-transparent">
-                      <div className="relative rounded-xl overflow-hidden bg-black border border-base-300">
+                    <div className="sticky top-0 z-20 -mx-4 -mt-4 px-4 pt-3 pb-3 bg-base-200 md:static md:mx-0 md:mt-0 md:px-0 md:pt-0 md:pb-0 md:bg-transparent md:border-none border-b border-base-300/60">
+                      {/* Header above video: back + title */}
+                      <div className="flex items-center gap-1 mb-2.5 md:mb-4">
+                        <button
+                          onClick={() => {
+                            setActiveFile(null);
+                            setFileContent(null);
+                            history.replaceState({}, "", `/${courseId}`);
+                          }}
+                          className="btn btn-ghost btn-sm btn-square shrink-0"
+                          aria-label="Back to curriculum"
+                        >
+                          <ArrowLeft size={18} />
+                        </button>
+                        <h2
+                          className="flex-1 min-w-0 truncate text-[15px] md:text-xl font-bold leading-tight"
+                          title={activeFile.name}
+                        >
+                          {activeFile.name}
+                        </h2>
+                      </div>
+                      <div className="relative rounded-md overflow-hidden bg-black border border-base-300">
+                      {/* No key: same <video> node across tracks so mobile
+                          fullscreen survives auto-next; path changes reload it. */}
                       <video
-                        key={activeFile.path}
                         ref={videoRef}
                         src={`${API}/api/courses/${courseId}/file?path=${encodeURIComponent(activeFile.path)}`}
                         controls
@@ -1212,51 +1321,35 @@ function CourseDetailOverlay({
                         }}
                       />
                     </div>
-                    <div className="mt-4 px-2 flex items-center justify-between">
-                      <div className="text-xl font-bold flex-1 mr-4 overflow-x-auto no-scrollbar whitespace-nowrap">
-                        {activeFile.name}
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          onClick={() => toggleWatch(activeFile.path)}
-                          className={`btn btn-sm gap-1.5 text-[10px] font-bold uppercase tracking-widest ${watched[activeFile.path] ? "btn-primary" : "btn-ghost border border-base-300"}`}
-                        >
-                          <Check size={12} />{" "}
-                          {watched[activeFile.path]
-                            ? "Watched"
-                            : "Mark Watched"}
-                        </button>
-                        {nextVideo && (
-                          <button
-                            onClick={() => {
-                              if (!watched[activeFile.path])
-                                toggleWatch(activeFile.path);
-                              setActiveFile(nextVideo);
-                              setFileContent(null);
-                              setLastResume(courseId, nextVideo.path);
-                            }}
-                            className="btn btn-sm btn-primary gap-1.5 text-[10px] font-bold uppercase tracking-widest"
-                          >
-                            Next <ChevronRight size={12} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {/* Mobile toolbar: home, collapse/expand, progress — stays pinned with video */}
-                    <div className="md:hidden mt-3 -mx-4 -mb-4 px-4 pt-3 pb-4 border-t border-base-300 bg-base-200 flex items-center justify-between gap-2">
+                    {/* Desktop actions: mark watched + next */}
+                    <div className="hidden md:flex mt-4 items-center justify-between gap-2">
                       <button
-                        onClick={onClose}
-                        className="btn btn-circle btn-xs btn-ghost text-primary shrink-0"
+                        onClick={() => toggleWatch(activeFile.path)}
+                        className={`btn btn-sm gap-1.5 text-[10px] font-bold uppercase tracking-widest ${watched[activeFile.path] ? "btn-primary" : "btn-ghost border border-base-300"}`}
                       >
-                        <Home size={18} />
+                        <Check size={12} />{" "}
+                        {watched[activeFile.path]
+                          ? "Watched"
+                          : "Mark Watched"}
                       </button>
-                      <div className="flex items-center gap-3">
+                      {nextVideo && (
                         <button
-                          onClick={toggleAll}
-                          className="btn btn-xs btn-primary bg-primary/20 text-primary hover:bg-primary/30 border-none px-2 h-auto py-1.5 min-h-0 text-[9px] uppercase tracking-widest"
+                          onClick={() => {
+                            if (!watched[activeFile.path])
+                              toggleWatch(activeFile.path);
+                            setActiveFile(nextVideo);
+                            setFileContent(null);
+                            setLastResume(courseId, nextVideo.path);
+                          }}
+                          className="btn btn-sm btn-primary gap-1.5 text-[10px] font-bold uppercase tracking-widest"
                         >
-                          {isAnyExpanded ? "Collapse All" : "Expand All"}
+                          Next <ChevronRight size={12} />
                         </button>
+                      )}
+                    </div>
+                    {/* Mobile combined row: progress + collapse | watched + next */}
+                    <div className="md:hidden mt-3 pt-3 border-t border-base-300 -mx-4 px-4 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <div className="relative w-8 h-8 shrink-0">
                           <svg
                             className="w-full h-full -rotate-90"
@@ -1291,12 +1384,43 @@ function CourseDetailOverlay({
                             {pct}
                           </span>
                         </div>
+                        <button
+                          onClick={toggleAll}
+                          className="text-[11px] font-semibold text-primary hover:underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer whitespace-nowrap"
+                        >
+                          {isAnyExpanded ? "Collapse all" : "Expand all"}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => toggleWatch(activeFile.path)}
+                          className={`btn btn-sm gap-1.5 text-[10px] font-bold uppercase tracking-widest ${watched[activeFile.path] ? "btn-primary" : "btn-ghost border border-base-300"}`}
+                        >
+                          <Check size={12} />{" "}
+                          {watched[activeFile.path]
+                            ? "Watched"
+                            : "Mark Watched"}
+                        </button>
+                        {nextVideo && (
+                          <button
+                            onClick={() => {
+                              if (!watched[activeFile.path])
+                                toggleWatch(activeFile.path);
+                              setActiveFile(nextVideo);
+                              setFileContent(null);
+                              setLastResume(courseId, nextVideo.path);
+                            }}
+                            className="btn btn-sm btn-primary gap-1.5 text-[10px] font-bold uppercase tracking-widest"
+                          >
+                            Next <ChevronRight size={12} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
 
                     {/* Mobile-only Curriculum Section */}
-                    <div className="md:hidden -mx-4 mt-4 border-t border-base-300">
+                    <div className="md:hidden -mx-4">
                       {loading ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader
@@ -1874,12 +1998,14 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  // ─── Header Resume: last video played across all courses ───
+  // ─── Header Resume: single server-side persistence shared by all devices ───
   const [resume, setResume] = useState(getLastResume);
   useEffect(() => {
     const sync = () => setResume(getLastResume());
     window.addEventListener("nest:resume", sync);
     window.addEventListener("storage", sync);
+    // Pull cross-device truth on load (local cache renders instantly first)
+    syncResumeFromServer().catch(() => {});
     return () => {
       window.removeEventListener("nest:resume", sync);
       window.removeEventListener("storage", sync);
@@ -1982,9 +2108,8 @@ export default function App() {
     try {
       const bundle = await api<Record<string, any>>("/api/settings/export");
       // Include client-side localStorage settings
+      // (theme is server-persisted — it rides in the server bundle already)
       const clientSettings: Record<string, any> = {
-        theme_name: safeGet("nest_theme_name") || "default",
-        theme_dark: safeGet("nest_theme_dark") || "true",
         last_played: {} as Record<string, string>,
         playback_time: {} as Record<string, string>,
       };
@@ -2031,10 +2156,9 @@ export default function App() {
           body: JSON.stringify(bundle),
         });
         // Restore client-side settings
+        // (theme restores server-side from bundle.resume.theme)
         if (bundle.clientSettings) {
           const cs = bundle.clientSettings;
-          if (cs.theme_name) safeSet("nest_theme_name", cs.theme_name);
-          if (cs.theme_dark !== undefined) safeSet("nest_theme_dark", cs.theme_dark);
           if (cs.last_played) {
             Object.entries(cs.last_played).forEach(([k, v]) => { if (typeof v === "string") safeSet(k, v); });
           }
@@ -2123,10 +2247,10 @@ export default function App() {
               <button
                 onClick={openResume}
                 title={`${resumeCourse.name} — ${resumeLabel}`}
-                className="btn btn-primary btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest max-w-[10rem] sm:max-w-xs"
+                className="btn btn-primary btn-sm gap-1 text-[10px] font-bold uppercase tracking-widest"
               >
                 <Play size={14} className="shrink-0" />
-                <span className="truncate">Resume{resumeLabel ? `: ${resumeLabel}` : ""}</span>
+                <span>Resume</span>
               </button>
             )}
             <button

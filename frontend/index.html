@@ -15,10 +15,14 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
     <script>
-      // Set theme before paint to avoid flash
+      // Set theme before paint to avoid flash (same keys the app persists)
       (function() {
-        var t = localStorage.getItem('nest_theme');
-        if (t) document.documentElement.setAttribute('data-theme', t);
+        try {
+          var n = localStorage.getItem('nest_theme_name') || 'default';
+          var d = localStorage.getItem('nest_theme_dark');
+          var dark = d !== null ? d === 'true' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.setAttribute('data-theme', n + '-' + (dark ? 'dark' : 'light'));
+        } catch (e) {}
       })();
     </script>
   </head>

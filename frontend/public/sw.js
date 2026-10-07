@@ -9,7 +9,8 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
-  if (e.request.method !== 'GET' || u.pathname.startsWith('/api/')) return; // ponytail: never cache API/media
+  if (e.request.method !== 'GET' || u.pathname.startsWith('/api/')) return;
+  if (u.origin !== self.location.origin) return; // fonts/CDN: let the browser handle it (CSP connect-src is 'self')
   if (e.request.mode === 'navigate') {
     e.respondWith(fetch(e.request).then((r) => { const c = r.clone(); caches.open(CACHE).then((cc) => cc.put('/index.html', c)); return r; }).catch(() => caches.match('/index.html')));
     return;

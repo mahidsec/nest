@@ -7,7 +7,7 @@ import path from "path";
 import crypto from "crypto";
 import { spawn } from "child_process";
 import { homedir } from "os";
-import { COURSES_PATH, COURSE_PROGRESS_PATH } from "./config.js";
+import { COURSES_PATH, COURSE_PROGRESS_PATH, RESUME_PATH } from "./config.js";
 import type {
   Course,
   CourseWithVideos,
@@ -16,6 +16,8 @@ import type {
 } from "./types.js";
 import {
   VALID_ICONS,
+  VALID_THEMES,
+  THEMES,
   HIDDEN_EXTS,
   VIDEO_EXTS,
   MIME_MAP,
@@ -27,7 +29,7 @@ import {
   VIDEO_COUNT_MAX,
   fileKind,
 } from "./constants.js";
-import { zenId, zenHeaders, buildChatBody } from "./zen.js";
+import { zenId, zenHeaders, buildChatBody, ZEN_CHAT_URL, ZEN_RESPONSES_URL, ZEN_MODELS_URL, apiForModel, buildResponsesBody, translateResponsesEvent, buildCandidates, isRetryableUpstream, isFreeModel, resolveModelId, recordModelResult, isModelBlocked } from "./zen.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -275,6 +277,44 @@ const saveCourseProgressData = async (
   const tmp = COURSE_PROGRESS_PATH + ".tmp";
   await writeFile(tmp, JSON.stringify(data));
   await rename(tmp, COURSE_PROGRESS_PATH);
+};
+
+// ─── Resume (global last-played + per-course last-played, server-side) ───
+// Single persistence shared by every device/browser hitting this server.
+// Shape: { global: { courseId, path, updatedAt } | null, perCourse: Record<courseId, path>, theme?: { name, dark } }
+type ResumeStore = {
+  global?: { courseId: string; path: string; updatedAt: string } | null;
+  perCourse?: Record<string, string>;
+  theme?: { name: string; dark: boolean } | null;
+};
+
+const getResumeData = async (): Promise<ResumeStore> => {
+  try {
+    const data = await readFile(RESUME_PATH, "utf-8");
+    const parsed = JSON.parse(data) as ResumeStore;
+    if (!parsed || typeof parsed !== "object") return {};
+    const theme =
+      parsed.theme && typeof parsed.theme === "object" &&
+      typeof parsed.theme.name === "string" && typeof parsed.theme.dark === "boolean"
+        ? { name: parsed.theme.name.slice(0, 32), dark: parsed.theme.dark }
+        : null;
+    return {
+      global: parsed.global ?? null,
+      perCourse:
+        parsed.perCourse && typeof parsed.perCourse === "object"
+          ? parsed.perCourse
+          : {},
+      theme,
+    };
+  } catch {
+    return {};
+  }
+};
+
+const saveResumeData = async (data: ResumeStore): Promise<void> => {
+  const tmp = RESUME_PATH + ".tmp";
+  await writeFile(tmp, JSON.stringify(data));
+  await rename(tmp, RESUME_PATH);
 };
 
 // ─── Cloudflare Tunnel (server-side for web UI control) ───
@@ -654,23 +694,89 @@ app.put("/api/courses/:id/progress", async (req, res) => {
   res.json(all[courseId]);
 });
 
+// ─── Resume: one server-side persistence for all devices ───
+
+app.get("/api/resume", async (_req, res) => {
+  const store = await getResumeData();
+  res.json({
+    resume: store.global ?? null,
+    perCourse: store.perCourse ?? {},
+    theme: store.theme ?? null,
+  });
+});
+
+app.get("/api/settings/theme", async (_req, res) => {
+  const store = await getResumeData();
+  res.json({ theme: store.theme ?? null, themes: THEMES });
+});
+
+app.put("/api/settings/theme", async (req, res) => {
+  const { name, dark } = req.body as { name?: unknown; dark?: unknown };
+  if (typeof name !== "string" || !VALID_THEMES.has(name))
+    return res.status(400).json({ error: `Invalid theme. Valid: ${[...VALID_THEMES].join(", ")}` });
+  if (typeof dark !== "boolean")
+    return res.status(400).json({ error: "dark must be a boolean" });
+  const store = await getResumeData();
+  const theme = { name, dark };
+  await saveResumeData({ global: store.global ?? null, perCourse: store.perCourse ?? {}, theme });
+  res.json({ theme });
+});
+
+app.put("/api/resume", async (req, res) => {
+  const { courseId, path: filePath } = req.body as {
+    courseId?: unknown;
+    path?: unknown;
+  };
+  if (typeof courseId !== "string" || !courseId)
+    return res.status(400).json({ error: "courseId required" });
+  if (typeof filePath !== "string" || !filePath)
+    return res.status(400).json({ error: "path required" });
+  if (courseId.length > 128 || filePath.length > 1024)
+    return res.status(400).json({ error: "courseId/path too long" });
+  const store = await getResumeData();
+  const perCourse = { ...(store.perCourse ?? {}) };
+  perCourse[courseId] = filePath;
+  const global = {
+    courseId,
+    path: filePath,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveResumeData({ global, perCourse, theme: store.theme ?? null });
+  res.json({ resume: global, perCourse });
+});
+
 // ─── Zen (OpenCode) request shape — mirrors 9router's bundled opencode adapter ───
 // Free tier 403s (FreeTierError) unless the request looks like the official
-// agentic client: versioned UA, canonical ses_/msg_ IDs, the {bash,glob,grep,
-// read} tool quartet, stream:true. Adapted from 9router PR #4132.
-// ponytail: muse-spark models prefer /zen/v1/responses (different body/SSE shape);
-// staying on chat/completions so the relay parser below keeps working — upgrade
-// to a responses-shape translator if muse-spark support is ever needed.
-const ZEN_CHAT_URL = "https://opencode.ai/zen/v1/chat/completions";
-const ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models";
+// agentic client: versioned UA, canonical ses_/msg_ IDs, stream:true, and the
+// tool quartet ({bash,glob,grep,read}) as no-op declarations. Adapted from
+// 9router PR #4132.
+// Exception: muse-spark models only serve via /zen/v1/responses (flat tool
+// shape, `instructions` + `input`) — chat/completions 500s upstream for them.
+// See zen.ts registry (apiForModel) — the only place model names are matched.
 let autoWinner: string | null = null;
-const zenFreeModels = async (signal: AbortSignal): Promise<string[]> => {
+// Cached live /models list (production-style: behavior follows upstream, not
+// hardcoded names). Refreshed in the background; stale cache keeps chat alive.
+let modelsCache: { ts: number; models: Array<{ id?: string; name?: string }> } = { ts: 0, models: [] };
+const MODELS_CACHE_TTL = 5 * 60_000;
+const zenAllModels = async (signal: AbortSignal): Promise<Array<{ id?: string; name?: string }>> => {
+  if (Date.now() - modelsCache.ts < MODELS_CACHE_TTL && modelsCache.models.length > 0)
+    return modelsCache.models;
   const r = await fetch(ZEN_MODELS_URL, { signal });
-  if (!r.ok) return [];
-  const d = (await r.json()) as { data?: Array<{ id?: string }> };
-  return (d?.data || [])
-    .map((m) => m.id || "")
-    .filter((id) => id && (id.endsWith("-free") || id === "big-pickle"));
+  if (!r.ok) {
+    if (modelsCache.models.length > 0) return modelsCache.models; // stale beats empty
+    throw new Error(`Upstream ${r.status}`);
+  }
+  const d = (await r.json()) as { data?: Array<{ id?: string; name?: string }> };
+  modelsCache = { ts: Date.now(), models: d?.data || [] };
+  return modelsCache.models;
+};
+const zenFreeModels = async (signal: AbortSignal): Promise<string[]> => {
+  try {
+    const models = await zenAllModels(signal);
+    return models.map((m) => m.id || "").filter((id) => isFreeModel(id));
+  } catch {
+    return [];
+  }
 };
 
 // ─── AI Chat Proxy (free models, no API key) ───
@@ -679,17 +785,12 @@ app.get("/api/ai/models", async (_req, res) => {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), AI_TIMEOUT_MS);
   try {
-    const resp = await fetch("https://opencode.ai/zen/v1/models", {
-      signal: ctl.signal,
+    const models = await zenAllModels(ctl.signal);
+    res.json({
+      data: models
+        .filter((m) => m.id && isFreeModel(m.id))
+        .map((m) => ({ id: resolveModelId(m.id as string), name: m.name })),
     });
-    if (!resp.ok) throw new Error(`Upstream ${resp.status}`);
-    const data = (await resp.json()) as {
-      data?: Array<{ id?: string; name?: string }>;
-    };
-    const models = (data?.data || []).filter(
-      (m) => m.id?.endsWith("-free") || m.id === "big-pickle",
-    );
-    res.json({ data: models });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown error";
     res.status(502).json({ error: "Failed to fetch models", detail: msg.slice(0, 200) });
@@ -773,36 +874,48 @@ The student is currently viewing: ${context}`
     if (!res.writableEnded) ctl.abort();
   });
   try {
-    // Auto: winner first, then free models in order; explicit model: one shot.
-    const free =
-      model === "auto"
-        ? await zenFreeModels(ctl.signal).catch((e: unknown) => {
-            if (e instanceof Error && e.name === "AbortError") throw e;
-            return [] as string[];
-          })
-        : [];
-    const candidates = (model === "auto" ? [autoWinner, ...free] : [model]).filter(
-      (m, i, a): m is string => !!m && a.indexOf(m) === i,
-    );
+    // Explicit model: itself first, then free-list fallback on retryable
+    // statuses (503 endpoint outages like exo-free's). Auto: winner + list.
+    const free = await zenFreeModels(ctl.signal).catch((e: unknown) => {
+      if (e instanceof Error && e.name === "AbortError") throw e;
+      return [] as string[];
+    });
+    const candidates = buildCandidates(model, autoWinner, free);
     let upstream: Response | null = null;
     let usedModel = model === "auto" ? "" : model;
+    let usedResponsesApi = false;
     let lastErr = "";
     for (const m of candidates.length ? candidates : [model]) {
+      if (isModelBlocked(m)) {
+        lastErr = `Skipped ${m}: temporarily unhealthy, trying next model`;
+        continue;
+      }
       try {
         const session = zenId("ses_");
-        const chatBody = buildChatBody(m, systemMsg, messages);
-        const r = await fetch(ZEN_CHAT_URL, {
+        const responsesApi = apiForModel(m) === "responses";
+        const r = await fetch(responsesApi ? ZEN_RESPONSES_URL : ZEN_CHAT_URL, {
           method: "POST",
           headers: zenHeaders(session),
           signal: ctl.signal,
-          body: JSON.stringify(chatBody),
+          body: JSON.stringify(
+            responsesApi
+              ? buildResponsesBody(m, systemMsg, messages)
+              : buildChatBody(m, systemMsg, messages),
+          ),
         });
         if (r.ok) {
           upstream = r;
           usedModel = m;
+          usedResponsesApi = responsesApi;
+          recordModelResult(m, true, false);
           break;
         }
+        const retryable = isRetryableUpstream(r.status);
+        recordModelResult(m, false, retryable);
         lastErr = `Upstream error ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`;
+        // Permanent failure on an explicit pick (bad request, unsupported
+        // model): stop instead of burning through the whole free list.
+        if (model !== "auto" && m === model && !retryable) break;
       } catch (e) {
         const aborted = e instanceof Error && e.name === "AbortError";
         lastErr =
@@ -811,6 +924,7 @@ The student is currently viewing: ${context}`
               ? "Request timed out, please retry"
               : e.message.slice(0, 300)
             : "Chat failed";
+        if (!aborted) recordModelResult(m, false, true); // network error: retryable
         if (aborted) break;
       }
     }
@@ -836,6 +950,7 @@ The student is currently viewing: ${context}`
     }
 
     let buffer = "";
+    let pendingEvent = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -844,13 +959,41 @@ The student is currently viewing: ${context}`
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          res.write(line + "\n\n");
+        if (line.startsWith("event: ")) {
+          pendingEvent = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          if (usedResponsesApi) {
+            // Responses stream: `event:` line + `data:` JSON payload —
+            // translate into chat-completions SSE the frontend parses.
+            try {
+              const payload = JSON.parse(line.slice(6));
+              for (const out of translateResponsesEvent(pendingEvent, payload)) {
+                res.write(out + "\n\n");
+                if (out === "data: [DONE]") pendingEvent = "__done__";
+              }
+            } catch { /* partial JSON: skip */ }
+          } else {
+            res.write(line + "\n\n");
+          }
+        } else if (line.trim() === "") {
+          pendingEvent = "";
         }
       }
+      if (pendingEvent === "__done__") break;
     }
     // flush remaining
-    if (buffer.trim()) res.write(buffer + "\n\n");
+    if (buffer.trim()) {
+      if (usedResponsesApi && pendingEvent && buffer.trim().startsWith("data: ")) {
+        try {
+          const payload = JSON.parse(buffer.trim().slice(6));
+          for (const out of translateResponsesEvent(pendingEvent, payload)) {
+            res.write(out + "\n\n");
+          }
+        } catch { /* partial JSON: skip */ }
+      } else if (!usedResponsesApi) {
+        res.write(buffer + "\n\n");
+      }
+    }
     res.write("data: [DONE]\n\n");
   } catch (err) {
     if (!res.writableEnded) {
@@ -875,12 +1018,14 @@ app.get("/api/settings/export", async (_req, res) => {
   try {
     const courses = await getCourses();
     const progress = await getCourseProgressData();
+    const resume = await getResumeData();
     const bundle = {
       _nest_backup: true,
       version: 1,
       exportedAt: new Date().toISOString(),
       courses,
       progress,
+      resume,
     };
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     res.setHeader("Content-Disposition", `attachment; filename="nest-backup-${timestamp}.json"`);
@@ -941,8 +1086,31 @@ app.post("/api/settings/import", async (req, res) => {
           cleanProgress[cid][fp] = true;
       }
     }
+    // Resume is optional (old backups lack it) — validate before restoring
+    let cleanResume: ResumeStore | null = null;
+    if (bundle.resume && typeof bundle.resume === "object" && !Array.isArray(bundle.resume)) {
+      const r = bundle.resume as ResumeStore;
+      const perCourse: Record<string, string> = {};
+      if (r.perCourse && typeof r.perCourse === "object" && !Array.isArray(r.perCourse)) {
+        for (const [cid, fp] of Object.entries(r.perCourse)) {
+          if (typeof cid === "string" && typeof fp === "string" && cid.length <= 128 && fp.length > 0 && fp.length < 1024)
+            perCourse[cid] = fp;
+        }
+      }
+      let global: ResumeStore["global"] = null;
+      if (r.global && typeof r.global === "object" && typeof r.global.courseId === "string" && typeof r.global.path === "string") {
+        if (r.global.courseId.length <= 128 && r.global.path.length < 1024)
+          global = { courseId: r.global.courseId, path: r.global.path, updatedAt: typeof r.global.updatedAt === "string" ? r.global.updatedAt : new Date().toISOString() };
+      }
+      let theme: ResumeStore["theme"] = null;
+      if (r.theme && typeof r.theme === "object" && typeof r.theme.name === "string" && typeof r.theme.dark === "boolean") {
+        if (VALID_THEMES.has(r.theme.name)) theme = { name: r.theme.name, dark: r.theme.dark };
+      }
+      cleanResume = { global: global ?? null, perCourse, theme };
+    }
     await saveCourses(cleanCourses);
     await saveCourseProgressData(cleanProgress);
+    if (cleanResume) await saveResumeData(cleanResume);
     videoCountCache.clear();
     res.json({ success: true, coursesImported: cleanCourses.length });
   } catch (err) {

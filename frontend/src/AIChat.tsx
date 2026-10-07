@@ -387,10 +387,8 @@ export default function AIChat({
               }`}
             >
               <div
-                className={`hidden md:flex w-6 h-6 rounded-full items-center justify-center shrink-0 ${
-                  msg.role === "user"
-                    ? "bg-primary/20 text-primary"
-                    : "bg-accent/20 text-accent"
+                className={`hidden md:flex w-6 h-6 items-center justify-center shrink-0 ${
+                  msg.role === "user" ? "text-primary" : "text-accent"
                 }`}
               >
                 {msg.role === "user" ? <User size={12} /> : <Bot size={12} />}
@@ -458,7 +456,7 @@ export default function AIChat({
           !messages[messages.length - 1]?.content &&
           !messages[messages.length - 1]?.reasoning && (
             <div className="flex gap-2">
-              <div className="hidden md:flex w-6 h-6 rounded-full items-center justify-center shrink-0 bg-accent/20 text-accent">
+              <div className="hidden md:flex w-6 h-6 items-center justify-center shrink-0 text-accent">
                 <Bot size={12} />
               </div>
               <div className="max-w-[85%] rounded-xl px-3 py-2 text-xs bg-base-200 border border-base-300 rounded-tl-sm">

@@ -1,10 +1,22 @@
 // ─── Shared backend constants (hoisted lookups + limits) ───
 
+// ─── App-owned enums (single source; frontend renders this list) ───
+export const THEMES = [
+  { name: "default", label: "Moonlight", icon: "🌑" },
+  { name: "sakura", label: "Sakura", icon: "🌸" },
+  { name: "matcha", label: "Matcha", icon: "🍵" },
+  { name: "starry", label: "Starry", icon: "🌌" },
+  { name: "cotton", label: "Cotton", icon: "🩷" },
+  { name: "ember", label: "Ember", icon: "🔥" },
+] as const;
+export const VALID_THEMES = new Set(THEMES.map((t) => t.name));
+
+
 export const VALID_ICONS = new Set([
   "Zap", "Music", "Languages", "BookOpen", "DollarSign", "Code",
   "Paintbrush", "Microscope", "BarChart3", "Dumbbell", "Camera",
   "Gamepad2", "Brain", "Scale", "HeartPulse", "Wrench",
-  "GraduationCap", "Briefcase",
+  "GraduationCap", "Briefcase", "Sparkles",
 ]);
 
 const VIDEO = new Set([".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v"]);
